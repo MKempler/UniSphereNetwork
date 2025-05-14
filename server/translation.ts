@@ -3,11 +3,11 @@
  */
 export async function generateTranslation(text: string, sourceLanguage: string, targetLanguage: string): Promise<string> {
   try {
-    // For the prototype, we simply return the original text
-    // In a real implementation, this would connect to a translation API
-    return text;
+    // Currently using mock translation as translation API may require credentials
+    console.log(`Translation requested: from ${sourceLanguage} to ${targetLanguage}`);
+    return text; // For now, just returning the original text
   } catch (error) {
-    console.error("Translation error:", error);
+    console.error('Translation error:', error);
     return text;
   }
 }
@@ -17,11 +17,11 @@ export async function generateTranslation(text: string, sourceLanguage: string, 
  */
 export async function detectLanguage(text: string): Promise<string> {
   try {
-    // For the prototype, we'll simply return English
-    // In a real implementation, this would use a language detection API
-    return "en";
+    // Currently using mock language detection as detection API may require credentials
+    console.log(`Language detection requested for: "${text.substring(0, 20)}..."`);
+    return 'en'; // Default to English for now
   } catch (error) {
-    console.error("Language detection error:", error);
-    return "en";
+    console.error('Language detection error:', error);
+    return 'en';
   }
 }

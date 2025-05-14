@@ -38,43 +38,33 @@ export default function Login() {
     },
   });
 
-  const loginMutation = useMutation({
-    mutationFn: async (credentials: LoginFormValues) => {
-      const response = await apiRequest("POST", "/api/auth/login", credentials);
-      const data = await response.json();
-      return data;
-    },
-    onSuccess: (data) => {
-      if (data.sessionId && data.user) {
-        login(data.sessionId, data.user);
-        navigate("/");
-        toast({
-          title: "Welcome back!",
-          description: "You have successfully logged in.",
-        });
-      } else {
-        toast({
-          title: "Login error",
-          description: "Invalid response from server",
-          variant: "destructive",
-        });
-      }
-    },
-    onError: (error) => {
+  const onSubmit = async (values: LoginFormValues) => {
+    try {
+      setIsSubmitting(true);
+      console.log("Submitting login form with:", values);
+      
+      // Use the login function directly from our useAuth hook
+      const result = await login(values);
+      
+      console.log("Login result:", result);
+      
+      toast({
+        title: "Welcome back!",
+        description: "You have successfully logged in.",
+      });
+      
+      navigate("/");
+    } catch (error) {
+      console.error("Login error:", error);
+      
       toast({
         title: "Login failed",
-        description: `${error}`,
+        description: error.message || "Invalid credentials",
         variant: "destructive",
       });
-    },
-    onSettled: () => {
+    } finally {
       setIsSubmitting(false);
     }
-  });
-
-  const onSubmit = (values: LoginFormValues) => {
-    setIsSubmitting(true);
-    loginMutation.mutate(values);
   };
 
   return (

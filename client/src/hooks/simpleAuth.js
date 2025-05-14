@@ -1,74 +1,114 @@
-// A simple authentication hook for debugging purposes
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 export function useAuth() {
   const [user, setUser] = useState(null);
-  const [sessionId, setSessionId] = useState(localStorage.getItem('sessionId'));
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   
-  // Check if user is logged in on mount
+  // Check for existing session on component mount
   useEffect(() => {
     const checkAuth = async () => {
+      const sessionId = localStorage.getItem('sessionId');
       console.log("Checking auth with sessionId:", sessionId);
+      
       if (sessionId) {
         try {
-          setIsLoading(true);
-          const headers = { 'Authorization': `Bearer ${sessionId}` };
-          console.log("Sending auth request with headers:", headers);
-          const response = await fetch('/api/users/me', { headers });
+          const response = await fetch('/api/users/me', {
+            headers: {
+              'Authorization': `Bearer ${sessionId}`
+            }
+          });
           
           if (response.ok) {
             const userData = await response.json();
-            console.log("Successfully retrieved user data:", userData);
+            console.log("User data loaded:", userData);
             setUser(userData);
           } else {
-            console.error("Auth check failed:", await response.text());
-            // Invalid session, clear it
+            console.log("Auth check failed, clearing session");
             localStorage.removeItem('sessionId');
-            setSessionId(null);
           }
         } catch (error) {
           console.error("Auth check error:", error);
-        } finally {
-          setIsLoading(false);
+          localStorage.removeItem('sessionId');
         }
       }
+      
+      setIsLoading(false);
     };
     
     checkAuth();
-  }, [sessionId]);
+  }, []);
   
-  const login = (newSessionId, userData) => {
-    console.log("Login called with sessionId:", newSessionId, "and user:", userData);
-    localStorage.setItem('sessionId', newSessionId);
-    setSessionId(newSessionId);
-    setUser(userData);
-  };
-  
-  const logout = async () => {
-    console.log("Logout called");
+  // Login function
+  const login = useCallback(async (credentials) => {
     try {
-      if (sessionId) {
-        await fetch('/api/auth/logout', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${sessionId}` },
-        });
+      console.log("Attempting login with:", credentials);
+      
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(credentials)
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Login failed:", errorText);
+        throw new Error(errorText);
+      }
+      
+      const data = await response.json();
+      console.log("Login success, data:", data);
+      
+      if (data.sessionId) {
+        localStorage.setItem('sessionId', data.sessionId);
+        console.log("Session ID saved to localStorage");
+        
+        if (data.user) {
+          setUser(data.user);
+          console.log("User data updated in state");
+        } else {
+          console.warn("No user data in response");
+        }
+        
+        return data;
+      } else {
+        console.error("No sessionId in response");
+        throw new Error("No session ID received");
       }
     } catch (error) {
-      console.error("Logout error:", error);
-    } finally {
-      localStorage.removeItem('sessionId');
-      setSessionId(null);
-      setUser(null);
+      console.error("Login error:", error);
+      throw error;
     }
-  };
+  }, []);
+  
+  // Logout function
+  const logout = useCallback(async () => {
+    const sessionId = localStorage.getItem('sessionId');
+    
+    if (sessionId) {
+      try {
+        await fetch('/api/auth/logout', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${sessionId}`
+          }
+        });
+      } catch (error) {
+        console.error("Logout error:", error);
+      }
+    }
+    
+    localStorage.removeItem('sessionId');
+    setUser(null);
+    console.log("Logged out, session cleared");
+  }, []);
   
   return {
     user,
     isLoading,
     login,
     logout,
-    isAuthenticated: !!user,
-    sessionId
+    isAuthenticated: !!user
   };
 }
