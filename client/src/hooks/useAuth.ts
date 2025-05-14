@@ -56,16 +56,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const contextValue = { 
+    user, 
+    isLoading: isLoading && !!sessionId, 
+    login, 
+    logout,
+    isAuthenticated: !!user
+  };
+  
   return (
-    <AuthContext.Provider 
-      value={{ 
-        user, 
-        isLoading: isLoading && !!sessionId, 
-        login, 
-        logout,
-        isAuthenticated: !!user
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

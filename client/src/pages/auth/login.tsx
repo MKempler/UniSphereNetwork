@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/useAuth.js";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -24,6 +25,7 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 export default function Login() {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { login } = useAuth();
   const [, navigate] = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -37,14 +39,25 @@ export default function Login() {
 
   const loginMutation = useMutation({
     mutationFn: async (credentials: LoginFormValues) => {
-      return apiRequest("POST", "/api/auth/login", credentials);
+      const response = await apiRequest("POST", "/api/auth/login", credentials);
+      const data = await response.json();
+      return data;
     },
-    onSuccess: () => {
-      navigate("/");
-      toast({
-        title: "Welcome back!",
-        description: "You have successfully logged in.",
-      });
+    onSuccess: (data) => {
+      if (data.sessionId && data.user) {
+        login(data.sessionId, data.user);
+        navigate("/");
+        toast({
+          title: "Welcome back!",
+          description: "You have successfully logged in.",
+        });
+      } else {
+        toast({
+          title: "Login error",
+          description: "Invalid response from server",
+          variant: "destructive",
+        });
+      }
     },
     onError: (error) => {
       toast({

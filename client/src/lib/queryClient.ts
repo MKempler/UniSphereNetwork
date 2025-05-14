@@ -53,11 +53,19 @@ export const getQueryFn: <T>(options: {
     });
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+      localStorage.removeItem('sessionId');
       return null;
     }
 
-    await throwIfResNotOk(res);
-    return await res.json();
+    try {
+      await throwIfResNotOk(res);
+      return await res.json();
+    } catch (error) {
+      if (res.status === 401) {
+        localStorage.removeItem('sessionId');
+      }
+      throw error;
+    }
   };
 
 export const queryClient = new QueryClient({

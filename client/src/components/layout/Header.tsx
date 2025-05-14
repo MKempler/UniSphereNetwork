@@ -2,17 +2,13 @@ import { Link, useLocation } from "wouter";
 import { useTranslation } from "react-i18next";
 import { Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/hooks/useAuth.js";
 import { User } from "@/types";
 
 export default function Header() {
   const { t } = useTranslation();
   const [location] = useLocation();
-
-  const { data: currentUser } = useQuery<User | null>({
-    queryKey: ["/api/users/me"],
-    staleTime: 1000 * 60 * 5, // 5 minutes
-  });
+  const { user: currentUser, logout } = useAuth();
 
   return (
     <header className="sticky top-0 z-50 bg-white border-b border-neutral-medium">
@@ -108,8 +104,8 @@ export default function Header() {
                 <button 
                   className="block w-full text-left px-4 py-2 text-sm text-error hover:bg-neutral-light" 
                   onClick={() => {
-                    fetch('/api/auth/logout', { method: 'POST' })
-                      .then(() => window.location.href = '/');
+                    logout();
+                    window.location.href = '/';
                   }}
                 >
                   {t("auth.logout")}
