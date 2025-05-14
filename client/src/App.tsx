@@ -7,7 +7,7 @@ import Login from "@/pages/auth/login";
 import Register from "@/pages/auth/register";
 import Profile from "@/pages/profile";
 import Debug from "@/pages/debug";
-import { ThemeProvider } from "next-themes";
+import { useEffect, useState } from "react";
 
 function Router() {
   return (
@@ -23,13 +23,24 @@ function Router() {
 }
 
 function App() {
+  const [mounted, setMounted] = useState(false);
+
+  // useEffect only runs on the client, so now we can safely show the UI
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) {
+    return null; // Avoid hydration mismatch by rendering nothing until client-side
+  }
+
   return (
-    <ThemeProvider attribute="class" defaultTheme="light">
-      <TooltipProvider>
+    <TooltipProvider>
+      <div className="min-h-screen bg-background text-foreground dark:bg-dark-bg">
         <Toaster />
         <Router />
-      </TooltipProvider>
-    </ThemeProvider>
+      </div>
+    </TooltipProvider>
   );
 }
 
