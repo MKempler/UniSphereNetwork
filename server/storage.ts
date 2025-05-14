@@ -9,8 +9,14 @@ import {
   Community, InsertCommunity,
   CommunityMember, InsertCommunityMember,
   Trend, InsertTrend,
-  Notification, InsertNotification
+  Notification, InsertNotification,
+  users, posts, follows, postInteractions, comments,
+  circuits, circuitSubscriptions, communities,
+  communityMembers, trends, notifications
 } from "@shared/schema";
+import { db } from "./db";
+import { eq, and, sql } from "drizzle-orm";
+import { generateTranslation, detectLanguage } from './translation';
 
 export interface IStorage {
   // User operations
@@ -71,700 +77,749 @@ export interface IStorage {
   markAllNotificationsAsRead(userId: number): Promise<void>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private posts: Map<number, Post>;
-  private follows: Map<number, Follow>;
-  private postInteractions: Map<number, PostInteraction>;
-  private comments: Map<number, Comment>;
-  private circuits: Map<number, Circuit>;
-  private circuitSubscriptions: Map<number, CircuitSubscription>;
-  private communities: Map<number, Community>;
-  private communityMembers: Map<number, CommunityMember>;
-  private trends: Map<number, Trend>;
-  private notifications: Map<number, Notification>;
-
-  private userIdCounter: number;
-  private postIdCounter: number;
-  private followIdCounter: number;
-  private interactionIdCounter: number;
-  private commentIdCounter: number;
-  private circuitIdCounter: number;
-  private subscriptionIdCounter: number;
-  private communityIdCounter: number;
-  private memberIdCounter: number;
-  private trendIdCounter: number;
-  private notificationIdCounter: number;
-
+export class DatabaseStorage implements IStorage {
   constructor() {
-    this.users = new Map();
-    this.posts = new Map();
-    this.follows = new Map();
-    this.postInteractions = new Map();
-    this.comments = new Map();
-    this.circuits = new Map();
-    this.circuitSubscriptions = new Map();
-    this.communities = new Map();
-    this.communityMembers = new Map();
-    this.trends = new Map();
-    this.notifications = new Map();
-
-    this.userIdCounter = 1;
-    this.postIdCounter = 1;
-    this.followIdCounter = 1;
-    this.interactionIdCounter = 1;
-    this.commentIdCounter = 1;
-    this.circuitIdCounter = 1;
-    this.subscriptionIdCounter = 1;
-    this.communityIdCounter = 1;
-    this.memberIdCounter = 1;
-    this.trendIdCounter = 1;
-    this.notificationIdCounter = 1;
-
-    // Initialize with sample data for demo purposes
-    this.initSampleData();
+    // Database connection is setup in db.ts and imported where needed
   }
 
-  // Initialize sample data
-  private async initSampleData() {
-    // Create a few sample users
-    const emma = await this.createUser({
-      username: "emma",
-      password: "password123",
-      name: "Emma Wilson",
-      email: "emma@example.com",
-      bio: "Digital creator | Photographer | Travel enthusiast",
-      profileImage: "https://images.unsplash.com/photo-1494790108377-be9c29b29330?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=256&h=256",
-      language: "en"
-    });
-
-    const david = await this.createUser({
-      username: "david",
-      password: "password123",
-      name: "David Chen",
-      email: "david@example.com",
-      bio: "Tech entrepreneur & investor",
-      profileImage: "https://images.unsplash.com/photo-1560250097-0b93528c311a?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=256&h=256",
-      language: "en"
-    });
-
-    const maria = await this.createUser({
-      username: "maria",
-      password: "password123",
-      name: "María Rodríguez",
-      email: "maria@example.com",
-      bio: "Writer and translator | Barcelona",
-      profileImage: "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=256&h=256",
-      language: "es"
-    });
-
-    const kenji = await this.createUser({
-      username: "kenji",
-      password: "password123",
-      name: "Kenji Tanaka",
-      email: "kenji@example.com",
-      bio: "Photographer based in Kyoto, Japan",
-      profileImage: "https://images.unsplash.com/photo-1605379399642-870262d3d051?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=256&h=256",
-      language: "ja"
-    });
-
-    // Set some users as verified
-    this.users.set(david.id, { ...david, isVerified: true });
-    this.users.set(kenji.id, { ...kenji, isVerified: true });
-
-    // Create follow relationships
-    await this.addFollow(emma.id, david.id);
-    await this.addFollow(emma.id, maria.id);
-    await this.addFollow(maria.id, emma.id);
-    await this.addFollow(david.id, emma.id);
-    await this.addFollow(kenji.id, david.id);
-
-    // Create communities
-    const globalCommons = await this.createCommunity({
-      name: "Global Commons",
-      description: "A community for global discussions and news",
-      color: "secondary"
-    });
-
-    const northAmerica = await this.createCommunity({
-      name: "North America",
-      description: "Regional community for North American users",
-      color: "primary"
-    });
-
-    const photographersCollective = await this.createCommunity({
-      name: "Photographers Collective",
-      description: "For passionate photographers around the world",
-      color: "accent"
-    });
-
-    // Add users to communities
-    await this.joinCommunity(emma.id, globalCommons.id);
-    await this.joinCommunity(emma.id, northAmerica.id);
-    await this.joinCommunity(david.id, globalCommons.id);
-    await this.joinCommunity(maria.id, globalCommons.id);
-    await this.joinCommunity(kenji.id, photographersCollective.id);
-
-    // Create circuits
-    const globalNews = await this.createCircuit({
-      name: "Global News",
-      description: "Top news from around the world",
-      creatorId: david.id,
-      color: "primary",
-      type: "news"
-    });
-
-    const photography = await this.createCircuit({
-      name: "Photography",
-      description: "Amazing shots from photographers worldwide",
-      creatorId: kenji.id,
-      color: "secondary",
-      type: "photography"
-    });
-
-    const techTrends = await this.createCircuit({
-      name: "Tech Trends",
-      description: "Latest in technology and innovation",
-      creatorId: david.id,
-      color: "accent",
-      type: "tech"
-    });
-
-    // Circuit subscriptions
-    await this.subscribeToCircuit(emma.id, globalNews.id);
-    await this.subscribeToCircuit(emma.id, photography.id);
-    await this.subscribeToCircuit(maria.id, globalNews.id);
-    await this.subscribeToCircuit(kenji.id, photography.id);
-    await this.subscribeToCircuit(david.id, techTrends.id);
-
-    // Create posts
-    const davidPost = await this.createPost({
-      content: "Excited to announce that our company is joining the UniSphere community! Looking forward to connecting with everyone in this innovative decentralized network. #DecentralizedFuture #UniSphere",
-      media: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=1200&h=675",
-      language: "en",
-      userId: david.id
-    });
-
-    const mariaPost = await this.createPost({
-      content: "¡Acabo de unirme a UniSphere y me encanta! La traducción automática hace que sea muy fácil comunicarse con personas de todo el mundo. #ComunidadGlobal",
-      language: "es",
-      userId: maria.id
-    });
-
-    const kenjiPost = await this.createPost({
-      content: "京都の竹林で夕暮れ時に撮影した素晴らしい瞬間。光が竹林を通して作り出す魔法のような雰囲気。 #写真 #自然 #京都",
-      media: "https://images.unsplash.com/photo-1503899036084-c55cdd92da26?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=1200&h=675",
-      language: "ja",
-      userId: kenji.id,
-      circuitId: photography.id
-    });
-
-    // Post interactions
-    await this.addInteraction(davidPost.id, emma.id, "like");
-    await this.addInteraction(davidPost.id, maria.id, "like");
-    await this.addInteraction(davidPost.id, kenji.id, "like");
-    await this.addInteraction(mariaPost.id, emma.id, "like");
-    await this.addInteraction(mariaPost.id, david.id, "like");
-    await this.addInteraction(kenjiPost.id, emma.id, "like");
-    await this.addInteraction(kenjiPost.id, david.id, "like");
-    await this.addInteraction(kenjiPost.id, maria.id, "like");
-
-    await this.addInteraction(davidPost.id, maria.id, "repost");
-    await this.addInteraction(kenjiPost.id, emma.id, "repost");
-
-    await this.addInteraction(kenjiPost.id, emma.id, "save");
-
-    // Create trends
-    await this.updateTrend("#DecentralizedFuture", "Technology");
-    await this.updateTrend("#UniSphere", "Technology");
-    await this.updateTrend("#GlobalCommunity", "Global");
-    await this.updateTrend("#NaturePhotography", "Photography");
-  }
-
-  // User methods
+  // User methods implementation with database
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username.toLowerCase() === username.toLowerCase()
-    );
-  }
-
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.email.toLowerCase() === email.toLowerCase()
-    );
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.userIdCounter++;
-    const user: User = {
-      ...insertUser,
-      id,
-      isVerified: false,
-      unreadNotifications: 0,
-      createdAt: new Date()
-    };
-    this.users.set(id, user);
-    return user;
-  }
-
-  async updateUser(id: number, userData: Partial<User>): Promise<User> {
-    const user = await this.getUser(id);
-    if (!user) {
-      throw new Error("User not found");
+    try {
+      const [user] = await db.select().from(users).where(eq(users.id, id));
+      return user;
+    } catch (error) {
+      console.error("Error in getUser:", error);
+      return undefined;
     }
-    
-    const updatedUser = { ...user, ...userData };
-    this.users.set(id, updatedUser);
-    return updatedUser;
   }
-
+  
+  async getUserByUsername(username: string): Promise<User | undefined> {
+    try {
+      const [user] = await db.select().from(users).where(eq(users.username, username));
+      return user;
+    } catch (error) {
+      console.error("Error in getUserByUsername:", error);
+      return undefined;
+    }
+  }
+  
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    try {
+      const [user] = await db.select().from(users).where(eq(users.email, email));
+      return user;
+    } catch (error) {
+      console.error("Error in getUserByEmail:", error);
+      return undefined;
+    }
+  }
+  
+  async createUser(insertUser: InsertUser): Promise<User> {
+    try {
+      const [user] = await db.insert(users).values({
+        ...insertUser,
+        coverImage: insertUser.coverImage || null,
+        bio: insertUser.bio || null,
+        language: insertUser.language || 'en',
+        createdAt: new Date(),
+        isVerified: false,
+        unreadNotifications: 0
+      }).returning();
+      return user;
+    } catch (error) {
+      console.error("Error in createUser:", error);
+      throw error;
+    }
+  }
+  
+  async updateUser(id: number, userData: Partial<User>): Promise<User> {
+    try {
+      const [user] = await db
+        .update(users)
+        .set(userData)
+        .where(eq(users.id, id))
+        .returning();
+      return user;
+    } catch (error) {
+      console.error("Error in updateUser:", error);
+      throw error;
+    }
+  }
+  
   async getFollowerCount(userId: number): Promise<number> {
-    return Array.from(this.follows.values()).filter(
-      (follow) => follow.followingId === userId
-    ).length;
+    try {
+      const result = await db
+        .select({ count: sql`count(*)` })
+        .from(follows)
+        .where(eq(follows.followingId, userId));
+      return Number(result[0]?.count || 0);
+    } catch (error) {
+      console.error("Error in getFollowerCount:", error);
+      return 0;
+    }
   }
 
   async getFollowingCount(userId: number): Promise<number> {
-    return Array.from(this.follows.values()).filter(
-      (follow) => follow.followerId === userId
-    ).length;
+    try {
+      const result = await db
+        .select({ count: sql`count(*)` })
+        .from(follows)
+        .where(eq(follows.followerId, userId));
+      return Number(result[0]?.count || 0);
+    } catch (error) {
+      console.error("Error in getFollowingCount:", error);
+      return 0;
+    }
   }
 
   async isFollowing(followerId: number, followingId: number): Promise<boolean> {
-    return Array.from(this.follows.values()).some(
-      (follow) => follow.followerId === followerId && follow.followingId === followingId
-    );
+    try {
+      const [follow] = await db
+        .select()
+        .from(follows)
+        .where(
+          and(
+            eq(follows.followerId, followerId),
+            eq(follows.followingId, followingId)
+          )
+        );
+      return !!follow;
+    } catch (error) {
+      console.error("Error in isFollowing:", error);
+      return false;
+    }
   }
 
   async addFollow(followerId: number, followingId: number): Promise<Follow> {
-    const id = this.followIdCounter++;
-    const follow: Follow = {
-      id,
-      followerId,
-      followingId,
-      createdAt: new Date()
-    };
-    this.follows.set(id, follow);
-    return follow;
+    try {
+      const [follow] = await db
+        .insert(follows)
+        .values({
+          followerId,
+          followingId,
+          createdAt: new Date()
+        })
+        .returning();
+      return follow;
+    } catch (error) {
+      console.error("Error in addFollow:", error);
+      throw error;
+    }
   }
 
   async removeFollow(followerId: number, followingId: number): Promise<void> {
-    const follow = Array.from(this.follows.values()).find(
-      (f) => f.followerId === followerId && f.followingId === followingId
-    );
-    
-    if (follow) {
-      this.follows.delete(follow.id);
+    try {
+      await db
+        .delete(follows)
+        .where(
+          and(
+            eq(follows.followerId, followerId),
+            eq(follows.followingId, followingId)
+          )
+        );
+    } catch (error) {
+      console.error("Error in removeFollow:", error);
+      throw error;
     }
   }
-
+  
   async getSuggestedUsers(currentUserId?: number): Promise<User[]> {
-    let users = Array.from(this.users.values());
-    
-    if (currentUserId) {
-      // Exclude current user and followed users
-      const followedUserIds = (await this.getFollowedUserIds(currentUserId)).concat(currentUserId);
-      users = users.filter(user => !followedUserIds.includes(user.id));
-    }
-    
-    // For a real implementation, we would have smarter algorithms
-    // For now, prioritize verified users and limit to 3
-    return users
-      .sort((a, b) => (b.isVerified ? 1 : 0) - (a.isVerified ? 1 : 0))
-      .slice(0, 3);
-  }
-
-  async getFollowedUserIds(userId: number): Promise<number[]> {
-    return Array.from(this.follows.values())
-      .filter(follow => follow.followerId === userId)
-      .map(follow => follow.followingId);
-  }
-
-  // Post methods
-  async getPost(id: number): Promise<Post | undefined> {
-    return this.posts.get(id);
-  }
-
-  async getAllPosts(page = 1, limit = 10): Promise<Post[]> {
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    
-    return Array.from(this.posts.values())
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(start, end);
-  }
-
-  async getFollowingPosts(userId: number, page = 1, limit = 10): Promise<Post[]> {
-    const followedUserIds = await this.getFollowedUserIds(userId);
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    
-    return Array.from(this.posts.values())
-      .filter(post => followedUserIds.includes(post.userId) || post.userId === userId)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(start, end);
-  }
-
-  async getCircuitPosts(userId: number, page = 1, limit = 10): Promise<Post[]> {
-    const subscribedCircuitIds = await this.getSubscribedCircuitIds(userId);
-    const start = (page - 1) * limit;
-    const end = start + limit;
-    
-    return Array.from(this.posts.values())
-      .filter(post => post.circuitId !== undefined && subscribedCircuitIds.includes(post.circuitId))
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(start, end);
-  }
-
-  async getUserPosts(userId: number): Promise<Post[]> {
-    return Array.from(this.posts.values())
-      .filter(post => post.userId === userId)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-  }
-
-  async createPost(insertPost: InsertPost): Promise<Post> {
-    const id = this.postIdCounter++;
-    const post: Post = {
-      ...insertPost,
-      id,
-      createdAt: new Date()
-    };
-    this.posts.set(id, post);
-    return post;
-  }
-
-  async deletePost(id: number): Promise<void> {
-    this.posts.delete(id);
-    
-    // Clean up interactions
-    for (const [interactionId, interaction] of this.postInteractions.entries()) {
-      if (interaction.postId === id) {
-        this.postInteractions.delete(interactionId);
-      }
-    }
-  }
-
-  async getPostCount(feedType: string, userId?: number): Promise<number> {
-    if (feedType === "following" && userId) {
-      const followedUserIds = await this.getFollowedUserIds(userId);
-      return Array.from(this.posts.values())
-        .filter(post => followedUserIds.includes(post.userId) || post.userId === userId)
-        .length;
-    } else if (feedType === "circuits" && userId) {
-      const subscribedCircuitIds = await this.getSubscribedCircuitIds(userId);
-      return Array.from(this.posts.values())
-        .filter(post => post.circuitId !== undefined && subscribedCircuitIds.includes(post.circuitId))
-        .length;
-    } else {
-      return this.posts.size;
-    }
-  }
-
-  // Post interactions
-  async addInteraction(postId: number, userId: number, type: string): Promise<PostInteraction> {
-    // First, check if the interaction already exists
-    const existingInteraction = Array.from(this.postInteractions.values()).find(
-      (interaction) => interaction.postId === postId && interaction.userId === userId && interaction.type === type
-    );
-    
-    if (existingInteraction) {
-      return existingInteraction;
-    }
-    
-    const id = this.interactionIdCounter++;
-    const interaction: PostInteraction = {
-      id,
-      postId,
-      userId,
-      type,
-      createdAt: new Date()
-    };
-    this.postInteractions.set(id, interaction);
-    return interaction;
-  }
-
-  async removeInteraction(postId: number, userId: number, type: string): Promise<void> {
-    const interaction = Array.from(this.postInteractions.values()).find(
-      (i) => i.postId === postId && i.userId === userId && i.type === type
-    );
-    
-    if (interaction) {
-      this.postInteractions.delete(interaction.id);
-    }
-  }
-
-  async hasInteraction(postId: number, userId: number, type: string): Promise<boolean> {
-    return Array.from(this.postInteractions.values()).some(
-      (interaction) => interaction.postId === postId && interaction.userId === userId && interaction.type === type
-    );
-  }
-
-  async getPostInteractionCount(postId: number, type: string): Promise<number> {
-    return Array.from(this.postInteractions.values()).filter(
-      (interaction) => interaction.postId === postId && interaction.type === type
-    ).length;
-  }
-
-  // Circuit methods
-  async getCircuit(id: number): Promise<Circuit | undefined> {
-    return this.circuits.get(id);
-  }
-
-  async getPopularCircuits(): Promise<Circuit[]> {
-    // In a real implementation, we would sort by activity or subscriber count
-    return Array.from(this.circuits.values()).slice(0, 3);
-  }
-
-  async createCircuit(insertCircuit: InsertCircuit): Promise<Circuit> {
-    const id = this.circuitIdCounter++;
-    const circuit: Circuit = {
-      ...insertCircuit,
-      id,
-      createdAt: new Date()
-    };
-    this.circuits.set(id, circuit);
-    return circuit;
-  }
-
-  async subscribeToCircuit(userId: number, circuitId: number): Promise<CircuitSubscription> {
-    const id = this.subscriptionIdCounter++;
-    const subscription: CircuitSubscription = {
-      id,
-      userId,
-      circuitId,
-      createdAt: new Date()
-    };
-    this.circuitSubscriptions.set(id, subscription);
-    return subscription;
-  }
-
-  async unsubscribeFromCircuit(userId: number, circuitId: number): Promise<void> {
-    const subscription = Array.from(this.circuitSubscriptions.values()).find(
-      (s) => s.userId === userId && s.circuitId === circuitId
-    );
-    
-    if (subscription) {
-      this.circuitSubscriptions.delete(subscription.id);
-    }
-  }
-
-  async isSubscribedToCircuit(userId: number, circuitId: number): Promise<boolean> {
-    return Array.from(this.circuitSubscriptions.values()).some(
-      (subscription) => subscription.userId === userId && subscription.circuitId === circuitId
-    );
-  }
-
-  async getCircuitSubscriberCount(circuitId: number): Promise<number> {
-    return Array.from(this.circuitSubscriptions.values()).filter(
-      (subscription) => subscription.circuitId === circuitId
-    ).length;
-  }
-
-  async getSubscribedCircuitIds(userId: number): Promise<number[]> {
-    return Array.from(this.circuitSubscriptions.values())
-      .filter(subscription => subscription.userId === userId)
-      .map(subscription => subscription.circuitId);
-  }
-
-  // Community methods
-  async getCommunity(id: number): Promise<Community | undefined> {
-    return this.communities.get(id);
-  }
-
-  async getUserCommunities(userId: number): Promise<Community[]> {
-    const memberCommunityIds = Array.from(this.communityMembers.values())
-      .filter(member => member.userId === userId)
-      .map(member => member.communityId);
-    
-    return Array.from(this.communities.values())
-      .filter(community => memberCommunityIds.includes(community.id));
-  }
-
-  async createCommunity(insertCommunity: InsertCommunity): Promise<Community> {
-    const id = this.communityIdCounter++;
-    const community: Community = {
-      ...insertCommunity,
-      id,
-      createdAt: new Date()
-    };
-    this.communities.set(id, community);
-    return community;
-  }
-
-  async joinCommunity(userId: number, communityId: number): Promise<CommunityMember> {
-    const id = this.memberIdCounter++;
-    const member: CommunityMember = {
-      id,
-      userId,
-      communityId,
-      createdAt: new Date()
-    };
-    this.communityMembers.set(id, member);
-    return member;
-  }
-
-  async leaveCommunity(userId: number, communityId: number): Promise<void> {
-    const member = Array.from(this.communityMembers.values()).find(
-      (m) => m.userId === userId && m.communityId === communityId
-    );
-    
-    if (member) {
-      this.communityMembers.delete(member.id);
-    }
-  }
-
-  async isJoinedCommunity(userId: number, communityId: number): Promise<boolean> {
-    return Array.from(this.communityMembers.values()).some(
-      (member) => member.userId === userId && member.communityId === communityId
-    );
-  }
-
-  async getCommunityMemberCount(communityId: number): Promise<number> {
-    return Array.from(this.communityMembers.values()).filter(
-      (member) => member.communityId === communityId
-    ).length;
-  }
-
-  // Trend methods
-  async getTrends(): Promise<Trend[]> {
-    return Array.from(this.trends.values())
-      .sort((a, b) => b.postCount - a.postCount)
-      .slice(0, 3);
-  }
-
-  async updateTrend(tag: string, category: string): Promise<Trend> {
-    const existingTrend = Array.from(this.trends.values()).find(
-      (trend) => trend.tag.toLowerCase() === tag.toLowerCase()
-    );
-    
-    if (existingTrend) {
-      const updatedTrend = {
-        ...existingTrend,
-        postCount: existingTrend.postCount + 1
-      };
-      this.trends.set(existingTrend.id, updatedTrend);
-      return updatedTrend;
-    } else {
-      const id = this.trendIdCounter++;
-      const trend: Trend = {
-        id,
-        tag,
-        category,
-        postCount: 1,
-        createdAt: new Date()
-      };
-      this.trends.set(id, trend);
-      return trend;
-    }
-  }
-
-  // Notification methods
-  async createNotification(insertNotification: InsertNotification): Promise<Notification> {
-    const id = this.notificationIdCounter++;
-    const notification: Notification = {
-      ...insertNotification,
-      id,
-      isRead: false,
-      createdAt: new Date()
-    };
-    this.notifications.set(id, notification);
-    
-    // Update unread count for the recipient
-    const user = await this.getUser(insertNotification.recipientId);
-    if (user) {
-      await this.updateUser(user.id, {
-        unreadNotifications: (user.unreadNotifications || 0) + 1
-      });
-    }
-    
-    return notification;
-  }
-
-  async getUserNotifications(userId: number): Promise<Notification[]> {
-    return Array.from(this.notifications.values())
-      .filter(notification => notification.recipientId === userId)
-      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
-  }
-
-  async markNotificationAsRead(id: number): Promise<void> {
-    const notification = this.notifications.get(id);
-    if (notification && !notification.isRead) {
-      this.notifications.set(id, { ...notification, isRead: true });
+    try {
+      // For now, just return some users the current user is not following
+      const query = db.select().from(users).limit(5);
       
-      // Update unread count for the recipient
-      const user = await this.getUser(notification.recipientId);
-      if (user && user.unreadNotifications > 0) {
-        await this.updateUser(user.id, {
-          unreadNotifications: user.unreadNotifications - 1
-        });
-      }
-    }
-  }
-
-  async markAllNotificationsAsRead(userId: number): Promise<void> {
-    const userNotifications = await this.getUserNotifications(userId);
-    const unreadCount = userNotifications.filter(n => !n.isRead).length;
-    
-    if (unreadCount > 0) {
-      // Mark all as read
-      for (const notification of userNotifications) {
-        if (!notification.isRead) {
-          this.notifications.set(notification.id, { ...notification, isRead: true });
+      if (currentUserId) {
+        // Get users the current user is not following
+        const followingIds = await this.getFollowedUserIds(currentUserId);
+        if (followingIds.length > 0) {
+          // Also exclude the current user
+          followingIds.push(currentUserId);
+          query.where(sql`${users.id} NOT IN (${followingIds.join(',')})`);
+        } else {
+          query.where(sql`${users.id} != ${currentUserId}`);
         }
       }
       
-      // Reset unread count
-      const user = await this.getUser(userId);
-      if (user) {
-        await this.updateUser(user.id, { unreadNotifications: 0 });
+      return await query;
+    } catch (error) {
+      console.error("Error in getSuggestedUsers:", error);
+      return [];
+    }
+  }
+  
+  async getFollowedUserIds(userId: number): Promise<number[]> {
+    try {
+      const followings = await db
+        .select({ followingId: follows.followingId })
+        .from(follows)
+        .where(eq(follows.followerId, userId));
+      
+      return followings.map(f => f.followingId);
+    } catch (error) {
+      console.error("Error in getFollowedUserIds:", error);
+      return [];
+    }
+  }
+  
+  // Post methods
+  async getPost(id: number): Promise<Post | undefined> {
+    try {
+      const [post] = await db.select().from(posts).where(eq(posts.id, id));
+      return post;
+    } catch (error) {
+      console.error("Error in getPost:", error);
+      return undefined;
+    }
+  }
+  
+  async getAllPosts(page = 1, limit = 10): Promise<Post[]> {
+    try {
+      const offset = (page - 1) * limit;
+      return await db
+        .select()
+        .from(posts)
+        .orderBy(sql`${posts.createdAt} DESC`)
+        .limit(limit)
+        .offset(offset);
+    } catch (error) {
+      console.error("Error in getAllPosts:", error);
+      return [];
+    }
+  }
+  
+  async getFollowingPosts(userId: number, page = 1, limit = 10): Promise<Post[]> {
+    try {
+      const offset = (page - 1) * limit;
+      const followingIds = await this.getFollowedUserIds(userId);
+      
+      if (followingIds.length === 0) return [];
+      
+      return await db
+        .select()
+        .from(posts)
+        .where(sql`${posts.userId} IN (${followingIds.join(',')})`)
+        .orderBy(sql`${posts.createdAt} DESC`)
+        .limit(limit)
+        .offset(offset);
+    } catch (error) {
+      console.error("Error in getFollowingPosts:", error);
+      return [];
+    }
+  }
+  
+  async getCircuitPosts(userId: number, page = 1, limit = 10): Promise<Post[]> {
+    try {
+      const offset = (page - 1) * limit;
+      // Get user's subscribed circuits
+      const circuitIds = await this.getSubscribedCircuitIds(userId);
+      
+      if (circuitIds.length === 0) return [];
+      
+      return await db
+        .select()
+        .from(posts)
+        .where(sql`${posts.circuitId} IN (${circuitIds.join(',')})`)
+        .orderBy(sql`${posts.createdAt} DESC`)
+        .limit(limit)
+        .offset(offset);
+    } catch (error) {
+      console.error("Error in getCircuitPosts:", error);
+      return [];
+    }
+  }
+  
+  async getSubscribedCircuitIds(userId: number): Promise<number[]> {
+    try {
+      const subscriptions = await db
+        .select({ circuitId: circuitSubscriptions.circuitId })
+        .from(circuitSubscriptions)
+        .where(eq(circuitSubscriptions.userId, userId));
+      
+      return subscriptions.map(s => s.circuitId);
+    } catch (error) {
+      console.error("Error in getSubscribedCircuitIds:", error);
+      return [];
+    }
+  }
+  
+  async getUserPosts(userId: number): Promise<Post[]> {
+    try {
+      return await db
+        .select()
+        .from(posts)
+        .where(eq(posts.userId, userId))
+        .orderBy(sql`${posts.createdAt} DESC`);
+    } catch (error) {
+      console.error("Error in getUserPosts:", error);
+      return [];
+    }
+  }
+  
+  async createPost(insertPost: InsertPost): Promise<Post> {
+    try {
+      const [post] = await db
+        .insert(posts)
+        .values({
+          ...insertPost,
+          media: insertPost.media || null,
+          circuitId: insertPost.circuitId || null,
+          createdAt: new Date()
+        })
+        .returning();
+      return post;
+    } catch (error) {
+      console.error("Error in createPost:", error);
+      throw error;
+    }
+  }
+  
+  async deletePost(id: number): Promise<void> {
+    try {
+      await db.delete(posts).where(eq(posts.id, id));
+    } catch (error) {
+      console.error("Error in deletePost:", error);
+      throw error;
+    }
+  }
+  
+  async getPostCount(feedType: string, userId?: number): Promise<number> {
+    try {
+      let query;
+      switch (feedType) {
+        case 'following':
+          if (!userId) return 0;
+          const followingIds = await this.getFollowedUserIds(userId);
+          if (followingIds.length === 0) return 0;
+          query = db
+            .select({ count: sql`count(*)` })
+            .from(posts)
+            .where(sql`${posts.userId} IN (${followingIds.join(',')})`);
+          break;
+        case 'circuit':
+          if (!userId) return 0;
+          const circuitIds = await this.getSubscribedCircuitIds(userId);
+          if (circuitIds.length === 0) return 0;
+          query = db
+            .select({ count: sql`count(*)` })
+            .from(posts)
+            .where(sql`${posts.circuitId} IN (${circuitIds.join(',')})`);
+          break;
+        case 'user':
+          if (!userId) return 0;
+          query = db
+            .select({ count: sql`count(*)` })
+            .from(posts)
+            .where(eq(posts.userId, userId));
+          break;
+        default:
+          query = db.select({ count: sql`count(*)` }).from(posts);
       }
+      
+      const result = await query;
+      return Number(result[0]?.count || 0);
+    } catch (error) {
+      console.error("Error in getPostCount:", error);
+      return 0;
+    }
+  }
+  
+  // Post interactions
+  async addInteraction(postId: number, userId: number, type: string): Promise<PostInteraction> {
+    try {
+      const [interaction] = await db
+        .insert(postInteractions)
+        .values({
+          postId,
+          userId,
+          type,
+          createdAt: new Date()
+        })
+        .returning();
+      return interaction;
+    } catch (error) {
+      console.error("Error in addInteraction:", error);
+      throw error;
+    }
+  }
+  
+  async removeInteraction(postId: number, userId: number, type: string): Promise<void> {
+    try {
+      await db
+        .delete(postInteractions)
+        .where(
+          and(
+            eq(postInteractions.postId, postId),
+            eq(postInteractions.userId, userId),
+            eq(postInteractions.type, type)
+          )
+        );
+    } catch (error) {
+      console.error("Error in removeInteraction:", error);
+      throw error;
+    }
+  }
+  
+  async hasInteraction(postId: number, userId: number, type: string): Promise<boolean> {
+    try {
+      const [interaction] = await db
+        .select()
+        .from(postInteractions)
+        .where(
+          and(
+            eq(postInteractions.postId, postId),
+            eq(postInteractions.userId, userId),
+            eq(postInteractions.type, type)
+          )
+        );
+      return !!interaction;
+    } catch (error) {
+      console.error("Error in hasInteraction:", error);
+      return false;
+    }
+  }
+  
+  async getPostInteractionCount(postId: number, type: string): Promise<number> {
+    try {
+      const result = await db
+        .select({ count: sql`count(*)` })
+        .from(postInteractions)
+        .where(
+          and(
+            eq(postInteractions.postId, postId),
+            eq(postInteractions.type, type)
+          )
+        );
+      return Number(result[0]?.count || 0);
+    } catch (error) {
+      console.error("Error in getPostInteractionCount:", error);
+      return 0;
+    }
+  }
+  
+  // Circuit operations
+  async getCircuit(id: number): Promise<Circuit | undefined> {
+    try {
+      const [circuit] = await db.select().from(circuits).where(eq(circuits.id, id));
+      return circuit;
+    } catch (error) {
+      console.error("Error in getCircuit:", error);
+      return undefined;
+    }
+  }
+  
+  async getPopularCircuits(): Promise<Circuit[]> {
+    try {
+      // In the future, we could order by subscriber count or activity
+      return await db.select().from(circuits).limit(5);
+    } catch (error) {
+      console.error("Error in getPopularCircuits:", error);
+      return [];
+    }
+  }
+  
+  async createCircuit(insertCircuit: InsertCircuit): Promise<Circuit> {
+    try {
+      const [circuit] = await db
+        .insert(circuits)
+        .values({
+          ...insertCircuit,
+          color: insertCircuit.color || null,
+          createdAt: new Date()
+        })
+        .returning();
+      return circuit;
+    } catch (error) {
+      console.error("Error in createCircuit:", error);
+      throw error;
+    }
+  }
+  
+  async subscribeToCircuit(userId: number, circuitId: number): Promise<CircuitSubscription> {
+    try {
+      const [subscription] = await db
+        .insert(circuitSubscriptions)
+        .values({
+          userId,
+          circuitId,
+          createdAt: new Date()
+        })
+        .returning();
+      return subscription;
+    } catch (error) {
+      console.error("Error in subscribeToCircuit:", error);
+      throw error;
+    }
+  }
+  
+  async unsubscribeFromCircuit(userId: number, circuitId: number): Promise<void> {
+    try {
+      await db
+        .delete(circuitSubscriptions)
+        .where(
+          and(
+            eq(circuitSubscriptions.userId, userId),
+            eq(circuitSubscriptions.circuitId, circuitId)
+          )
+        );
+    } catch (error) {
+      console.error("Error in unsubscribeFromCircuit:", error);
+      throw error;
+    }
+  }
+  
+  async isSubscribedToCircuit(userId: number, circuitId: number): Promise<boolean> {
+    try {
+      const [subscription] = await db
+        .select()
+        .from(circuitSubscriptions)
+        .where(
+          and(
+            eq(circuitSubscriptions.userId, userId),
+            eq(circuitSubscriptions.circuitId, circuitId)
+          )
+        );
+      return !!subscription;
+    } catch (error) {
+      console.error("Error in isSubscribedToCircuit:", error);
+      return false;
+    }
+  }
+  
+  async getCircuitSubscriberCount(circuitId: number): Promise<number> {
+    try {
+      const result = await db
+        .select({ count: sql`count(*)` })
+        .from(circuitSubscriptions)
+        .where(eq(circuitSubscriptions.circuitId, circuitId));
+      return Number(result[0]?.count || 0);
+    } catch (error) {
+      console.error("Error in getCircuitSubscriberCount:", error);
+      return 0;
+    }
+  }
+  
+  // Community operations
+  async getCommunity(id: number): Promise<Community | undefined> {
+    try {
+      const [community] = await db.select().from(communities).where(eq(communities.id, id));
+      return community;
+    } catch (error) {
+      console.error("Error in getCommunity:", error);
+      return undefined;
+    }
+  }
+  
+  async getUserCommunities(userId: number): Promise<Community[]> {
+    try {
+      const memberCommunities = await db
+        .select({
+          communityId: communityMembers.communityId
+        })
+        .from(communityMembers)
+        .where(eq(communityMembers.userId, userId));
+      
+      if (memberCommunities.length === 0) return [];
+      
+      const communityIds = memberCommunities.map(m => m.communityId);
+      
+      return await db
+        .select()
+        .from(communities)
+        .where(sql`${communities.id} IN (${communityIds.join(',')})`);
+    } catch (error) {
+      console.error("Error in getUserCommunities:", error);
+      return [];
+    }
+  }
+  
+  async createCommunity(insertCommunity: InsertCommunity): Promise<Community> {
+    try {
+      const [community] = await db
+        .insert(communities)
+        .values({
+          ...insertCommunity,
+          color: insertCommunity.color || null,
+          createdAt: new Date()
+        })
+        .returning();
+      return community;
+    } catch (error) {
+      console.error("Error in createCommunity:", error);
+      throw error;
+    }
+  }
+  
+  async joinCommunity(userId: number, communityId: number): Promise<CommunityMember> {
+    try {
+      const [member] = await db
+        .insert(communityMembers)
+        .values({
+          userId,
+          communityId,
+          createdAt: new Date()
+        })
+        .returning();
+      return member;
+    } catch (error) {
+      console.error("Error in joinCommunity:", error);
+      throw error;
+    }
+  }
+  
+  async leaveCommunity(userId: number, communityId: number): Promise<void> {
+    try {
+      await db
+        .delete(communityMembers)
+        .where(
+          and(
+            eq(communityMembers.userId, userId),
+            eq(communityMembers.communityId, communityId)
+          )
+        );
+    } catch (error) {
+      console.error("Error in leaveCommunity:", error);
+      throw error;
+    }
+  }
+  
+  async isJoinedCommunity(userId: number, communityId: number): Promise<boolean> {
+    try {
+      const [member] = await db
+        .select()
+        .from(communityMembers)
+        .where(
+          and(
+            eq(communityMembers.userId, userId),
+            eq(communityMembers.communityId, communityId)
+          )
+        );
+      return !!member;
+    } catch (error) {
+      console.error("Error in isJoinedCommunity:", error);
+      return false;
+    }
+  }
+  
+  async getCommunityMemberCount(communityId: number): Promise<number> {
+    try {
+      const result = await db
+        .select({ count: sql`count(*)` })
+        .from(communityMembers)
+        .where(eq(communityMembers.communityId, communityId));
+      return Number(result[0]?.count || 0);
+    } catch (error) {
+      console.error("Error in getCommunityMemberCount:", error);
+      return 0;
+    }
+  }
+  
+  // Trends
+  async getTrends(): Promise<Trend[]> {
+    try {
+      return await db
+        .select()
+        .from(trends)
+        .orderBy(sql`${trends.postCount} DESC`)
+        .limit(10);
+    } catch (error) {
+      console.error("Error in getTrends:", error);
+      return [];
+    }
+  }
+  
+  async updateTrend(tag: string, category: string): Promise<Trend> {
+    try {
+      const [existingTrend] = await db
+        .select()
+        .from(trends)
+        .where(eq(trends.tag, tag));
+      
+      if (existingTrend) {
+        // Update existing trend
+        const [trend] = await db
+          .update(trends)
+          .set({
+            postCount: existingTrend.postCount + 1
+          })
+          .where(eq(trends.id, existingTrend.id))
+          .returning();
+        return trend;
+      } else {
+        // Create new trend
+        const [trend] = await db
+          .insert(trends)
+          .values({
+            tag,
+            category,
+            postCount: 1,
+            createdAt: new Date()
+          })
+          .returning();
+        return trend;
+      }
+    } catch (error) {
+      console.error("Error in updateTrend:", error);
+      throw error;
+    }
+  }
+  
+  // Notifications
+  async createNotification(insertNotification: InsertNotification): Promise<Notification> {
+    try {
+      const [notification] = await db
+        .insert(notifications)
+        .values({
+          ...insertNotification,
+          isRead: false,
+          createdAt: new Date(),
+          postId: insertNotification.postId || null,
+          data: insertNotification.data || {}
+        })
+        .returning();
+      return notification;
+    } catch (error) {
+      console.error("Error in createNotification:", error);
+      throw error;
+    }
+  }
+  
+  async getUserNotifications(userId: number): Promise<Notification[]> {
+    try {
+      return await db
+        .select()
+        .from(notifications)
+        .where(eq(notifications.recipientId, userId))
+        .orderBy(sql`${notifications.createdAt} DESC`);
+    } catch (error) {
+      console.error("Error in getUserNotifications:", error);
+      return [];
+    }
+  }
+  
+  async markNotificationAsRead(id: number): Promise<void> {
+    try {
+      await db
+        .update(notifications)
+        .set({ isRead: true })
+        .where(eq(notifications.id, id));
+    } catch (error) {
+      console.error("Error in markNotificationAsRead:", error);
+      throw error;
+    }
+  }
+  
+  async markAllNotificationsAsRead(userId: number): Promise<void> {
+    try {
+      await db
+        .update(notifications)
+        .set({ isRead: true })
+        .where(eq(notifications.recipientId, userId));
+    } catch (error) {
+      console.error("Error in markAllNotificationsAsRead:", error);
+      throw error;
     }
   }
 }
 
-// Create a translation helper module
-export const generateTranslation = async (text: string, sourceLanguage: string, targetLanguage: string): Promise<string> => {
-  // For MVP, we'll just simulate translation
-  // In a real app, this would connect to Google Translate API or similar
-  
-  // Sample translations for demo
-  const translations: Record<string, Record<string, string>> = {
-    "es": {
-      "en": "I just joined UniSphere and I love it! Automatic translation makes it very easy to communicate with people from all over the world. #GlobalCommunity"
-    },
-    "ja": {
-      "en": "Captured this incredible moment during sunset in Kyoto yesterday. The way the light filters through the bamboo forest creates a magical atmosphere. #Photography #Nature #Kyoto"
-    }
-  };
-  
-  // If we have a predefined translation, use it
-  if (translations[sourceLanguage]?.[targetLanguage]) {
-    return translations[sourceLanguage][targetLanguage];
-  }
-  
-  // Otherwise, just return the original text (simulating no translation available)
-  return text;
-};
+// Storage instance
 
-export const detectLanguage = async (text: string): Promise<string> => {
-  // For MVP, use simple detection based on common words
-  // In a real app, would use a language detection API
-  
-  // Very simplistic detection for demo purposes
-  if (/¡|¿|hola|gracias|buenos días|cómo estás/.test(text.toLowerCase())) {
-    return "es";
-  } else if (/こんにちは|ありがとう|私は|です|ます|京都|竹林/.test(text)) {
-    return "ja";
-  } else if (/bonjour|merci|comment|ça va|français/.test(text.toLowerCase())) {
-    return "fr";
-  }
-  
-  // Default to English
-  return "en";
-};
-
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
