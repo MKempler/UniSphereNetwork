@@ -54,12 +54,12 @@ export default function Login() {
       });
       
       navigate("/");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Login error:", error);
       
       toast({
         title: "Login failed",
-        description: error.message || "Invalid credentials",
+        description: error?.message || "Invalid credentials",
         variant: "destructive",
       });
     } finally {

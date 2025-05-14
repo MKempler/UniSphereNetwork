@@ -13,10 +13,23 @@ const sessions: Record<string, { userId: number }> = {};
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware to check authentication
   const authMiddleware = (req: Request, res: Response, next: () => void) => {
-    const sessionId = req.headers.authorization?.split(" ")[1];
-    if (!sessionId || !sessions[sessionId]) {
-      return res.status(401).json({ message: "Unauthorized" });
+    const authHeader = req.headers.authorization;
+    const sessionId = authHeader?.split(" ")[1];
+    
+    console.log(`Auth check - Auth Header: ${authHeader}, SessionId: ${sessionId}`);
+    console.log(`Active sessions: ${Object.keys(sessions).length}`);
+    
+    if (!sessionId) {
+      console.log('No session ID in request');
+      return res.status(401).json({ message: "Unauthorized - No session ID" });
     }
+    
+    if (!sessions[sessionId]) {
+      console.log(`Session ID ${sessionId} not found in active sessions`);
+      return res.status(401).json({ message: "Unauthorized - Invalid session" });
+    }
+    
+    console.log(`Auth successful for user ID: ${sessions[sessionId].userId}`);
     req.body.currentUserId = sessions[sessionId].userId;
     next();
   };
@@ -133,44 +146,85 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/login", async (req, res) => {
     try {
-      const loginData = loginSchema.parse(req.body);
-      const user = await storage.getUserByUsername(loginData.username);
+      console.log("Login attempt:", req.body);
       
-      if (!user || user.password !== loginData.password) {
+      const loginData = loginSchema.parse(req.body);
+      console.log("Validated login data:", loginData);
+      
+      const user = await storage.getUserByUsername(loginData.username);
+      console.log("User found:", user ? `ID: ${user.id}, username: ${user.username}` : "No user found");
+      
+      if (!user) {
+        console.log(`Login failed: User '${loginData.username}' not found`);
         return res.status(401).json({ message: "Invalid username or password" });
       }
       
-      const sessionId = Math.random().toString(36).substring(2, 15);
+      if (user.password !== loginData.password) {
+        console.log(`Login failed: Password mismatch for user '${loginData.username}'`);
+        return res.status(401).json({ message: "Invalid username or password" });
+      }
+      
+      // Generate a secure session ID
+      const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
       sessions[sessionId] = { userId: user.id };
+      
+      console.log(`Login successful - Created session ${sessionId} for user ${user.id}`);
+      console.log(`Total active sessions: ${Object.keys(sessions).length}`);
+      
+      const formattedUser = await formatUser(user);
       
       res.status(200).json({ 
         message: "Login successful",
         sessionId,
-        user: await formatUser(user)
+        user: formattedUser
       });
     } catch (error) {
+      console.error("Login error:", error);
       handleError(error, res);
     }
   });
 
   app.post("/api/auth/logout", (req, res) => {
-    const sessionId = req.headers.authorization?.split(" ")[1];
-    if (sessionId && sessions[sessionId]) {
-      delete sessions[sessionId];
+    const authHeader = req.headers.authorization;
+    const sessionId = authHeader?.split(" ")[1];
+    
+    console.log(`Logout attempt - Auth Header: ${authHeader}, SessionId: ${sessionId}`);
+    
+    if (!sessionId) {
+      console.log('Logout: No session ID provided');
+      return res.status(400).json({ message: "No session ID provided" });
     }
-    res.status(200).json({ message: "Logged out successfully" });
+    
+    if (sessions[sessionId]) {
+      const userId = sessions[sessionId].userId;
+      console.log(`Logging out user ID ${userId} with session ${sessionId}`);
+      delete sessions[sessionId];
+      console.log(`Session removed, remaining sessions: ${Object.keys(sessions).length}`);
+      return res.status(200).json({ message: "Logged out successfully" });
+    } else {
+      console.log(`Logout: Session ID ${sessionId} not found`);
+      return res.status(400).json({ message: "Invalid session" });
+    }
   });
 
   // Current User Route
   app.get("/api/users/me", authMiddleware, async (req, res) => {
     try {
+      console.log(`Fetching user profile for ID: ${req.body.currentUserId}`);
+      
       const user = await storage.getUser(req.body.currentUserId);
+      
       if (!user) {
+        console.log(`User profile fetch failed: User ID ${req.body.currentUserId} not found`);
         return res.status(404).json({ message: "User not found" });
       }
       
-      res.status(200).json(await formatUser(user));
+      console.log(`User profile fetch successful for ${user.username} (ID: ${user.id})`);
+      const formattedUser = await formatUser(user);
+      
+      res.status(200).json(formattedUser);
     } catch (error) {
+      console.error("Error fetching user profile:", error);
       handleError(error, res);
     }
   });
