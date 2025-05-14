@@ -21,6 +21,9 @@ export async function apiRequest(
   
   if (sessionId) {
     headers['Authorization'] = `Bearer ${sessionId}`;
+    console.log(`API Request to ${url} with sessionId: ${sessionId}`);
+  } else {
+    console.log(`API Request to ${url} without sessionId`);
   }
   
   const res = await fetch(url, {
@@ -29,6 +32,16 @@ export async function apiRequest(
     body: data ? JSON.stringify(data) : undefined,
     credentials: "include",
   });
+
+  // Special handling for login success
+  if (url.includes('/api/auth/login') && res.ok) {
+    const responseClone = res.clone();
+    const data = await responseClone.json();
+    if (data.sessionId) {
+      console.log('Login successful, saving sessionId:', data.sessionId);
+      localStorage.setItem('sessionId', data.sessionId);
+    }
+  }
 
   await throwIfResNotOk(res);
   return res;
@@ -42,25 +55,35 @@ export const getQueryFn: <T>(options: {
   async ({ queryKey }) => {
     const sessionId = localStorage.getItem('sessionId');
     const headers: Record<string, string> = {};
+    const url = queryKey[0] as string;
     
     if (sessionId) {
       headers['Authorization'] = `Bearer ${sessionId}`;
+      console.log(`Query to ${url} with sessionId: ${sessionId}`);
+    } else {
+      console.log(`Query to ${url} without sessionId`);
     }
     
-    const res = await fetch(queryKey[0] as string, {
+    const res = await fetch(url, {
       headers,
       credentials: "include",
     });
 
+    console.log(`Response from ${url}: status ${res.status}`);
+
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
+      console.log(`Auth failed for ${url}, clearing sessionId`);
       localStorage.removeItem('sessionId');
       return null;
     }
 
     try {
       await throwIfResNotOk(res);
-      return await res.json();
+      const data = await res.json();
+      console.log(`Data from ${url}:`, data);
+      return data;
     } catch (error) {
+      console.error(`Error from ${url}:`, error);
       if (res.status === 401) {
         localStorage.removeItem('sessionId');
       }
