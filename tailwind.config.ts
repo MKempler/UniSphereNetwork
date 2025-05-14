@@ -4,6 +4,12 @@ export default {
   darkMode: ["class"],
   content: ["./client/index.html", "./client/src/**/*.{js,jsx,ts,tsx}"],
   theme: {
+    screens: {
+      'sm': '640px',
+      'md': '768px',
+      'lg': '1024px',
+      'xl': '1280px',
+    },
     extend: {
       borderRadius: {
         lg: "var(--radius)",
@@ -24,6 +30,9 @@ export default {
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
+          500: "var(--color-primary-500)",  /* blue 500 */
+          600: "var(--color-primary-600)",  /* hover */
+          700: "var(--color-primary-700)",  /* dark-mode accent */
         },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
@@ -36,10 +45,22 @@ export default {
         accent: {
           DEFAULT: "hsl(var(--accent))",
           foreground: "hsl(var(--accent-foreground))",
+          500: "var(--color-accent-500)",  /* teal green */
+          600: "var(--color-accent-600)",  /* hover */
         },
         destructive: {
           DEFAULT: "hsl(var(--destructive))",
           foreground: "hsl(var(--destructive-foreground))",
+        },
+        neutral: {
+          50: "var(--color-neutral-50)",
+          100: "var(--color-neutral-100)",
+          300: "var(--color-neutral-300)",
+          600: "var(--color-neutral-600)",
+          800: "var(--color-neutral-800)",
+        },
+        dark: {
+          bg: "var(--color-dark-bg)",
         },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
