@@ -6,6 +6,7 @@ import Home from "@/pages/home";
 import Login from "@/pages/auth/login";
 import Register from "@/pages/auth/register";
 import Profile from "@/pages/profile";
+import Debug from "@/pages/debug";
 import { ThemeProvider } from "next-themes";
 
 function Router() {
@@ -15,6 +16,7 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/profile/:username?" component={Profile} />
+      <Route path="/debug" component={Debug} />
       <Route component={NotFound} />
     </Switch>
   );
