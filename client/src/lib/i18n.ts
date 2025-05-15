@@ -31,6 +31,11 @@ i18n
           "nav.messages": "Messages",
           "nav.saved": "Saved",
           "nav.search": "Search UniSphere",
+          "nav.main": "Main",
+          "nav.discover": "Discover",
+          "nav.theme": "Theme",
+          "nav.communities": "Communities",
+          "nav.trending": "Trending",
           
           // Auth
           "auth.login": "Login",
@@ -60,6 +65,8 @@ i18n
           "feed.global": "Global Feed",
           "feed.global_description": "Popular posts from around the world",
           "feed.load_more": "Load more posts",
+          "feed.empty.title": "No posts yet",
+          "feed.empty.default": "There are no posts to display.",
           
           // Sidebar
           "sidebar.communities": "Your Community Nodes",
@@ -78,7 +85,17 @@ i18n
           "footer.privacy": "Privacy Policy",
           "footer.cookies": "Cookie Policy",
           "footer.accessibility": "Accessibility",
-          "footer.copyright": "© 2023 UniSphere"
+          "footer.copyright": "© 2023 UniSphere",
+          
+          // Trending
+          "trending.title": "Trending Topics",
+          "trending.empty": "No trending topics right now.",
+          "trending.showMore": "Show more trends",
+          
+          // Suggested
+          "suggested.title": "Suggested Users",
+          "suggested.empty": "No suggestions available.",
+          "suggested.showMore": "Show more suggestions"
         }
       }
     }

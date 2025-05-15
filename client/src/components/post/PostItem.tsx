@@ -15,6 +15,10 @@ interface PostItemProps {
 }
 
 export default function PostItem({ post, isCircuitPost, circuitName }: PostItemProps) {
+  if (!post.author) {
+    return null;
+  }
+
   const { t } = useTranslation();
   const { toast } = useToast();
   const queryClient = useQueryClient();

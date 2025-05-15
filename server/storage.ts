@@ -23,13 +23,16 @@ export interface IStorage {
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getUserByDid(did: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, user: Partial<User>): Promise<User>;
   getFollowerCount(userId: number): Promise<number>;
   getFollowingCount(userId: number): Promise<number>;
   isFollowing(followerId: number, followingId: number): Promise<boolean>;
   addFollow(followerId: number, followingId: number): Promise<Follow>;
+  addFollow(followerId: number, remoteDid: string, remoteNode?: string): Promise<Follow>;
   removeFollow(followerId: number, followingId: number): Promise<void>;
+  removeFollow(followerId: number, remoteDid: string): Promise<void>;
   getSuggestedUsers(currentUserId?: number): Promise<User[]>;
 
   // Post operations
@@ -75,6 +78,14 @@ export interface IStorage {
   getUserNotifications(userId: number): Promise<Notification[]>;
   markNotificationAsRead(id: number): Promise<void>;
   markAllNotificationsAsRead(userId: number): Promise<void>;
+
+  // Remote follow operations
+  getFollow(followerId: number, remoteDid: string): Promise<Follow | undefined>;
+  addFollow(followerId: number, remoteDid: string, remoteNode?: string): Promise<Follow>;
+  removeFollow(followerId: number, remoteDid: string): Promise<void>;
+
+  // New method
+  getPostsByUserIds(userIds: number[], page?: number, limit?: number): Promise<Post[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -109,6 +120,16 @@ export class DatabaseStorage implements IStorage {
       return user;
     } catch (error) {
       console.error("Error in getUserByEmail:", error);
+      return undefined;
+    }
+  }
+  
+  async getUserByDid(did: string): Promise<User | undefined> {
+    try {
+      const [user] = await db.select().from(users).where(eq(users.did, did));
+      return user;
+    } catch (error) {
+      console.error("Error in getUserByDid:", error);
       return undefined;
     }
   }
@@ -189,8 +210,10 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async addFollow(followerId: number, followingId: number): Promise<Follow> {
-    try {
+  async addFollow(followerId: number, arg2: number | string, remoteNode?: string): Promise<Follow> {
+    if (typeof arg2 === 'number') {
+      // Local follow
+      const followingId = arg2;
       const [follow] = await db
         .insert(follows)
         .values({
@@ -200,14 +223,23 @@ export class DatabaseStorage implements IStorage {
         })
         .returning();
       return follow;
-    } catch (error) {
-      console.error("Error in addFollow:", error);
-      throw error;
+    } else {
+      // Remote follow
+      const remoteDid = arg2;
+      const [follow] = await db.insert(follows).values({
+        followerId,
+        remoteDid,
+        remoteNode: remoteNode || null,
+        createdAt: new Date()
+      }).returning();
+      return follow;
     }
   }
 
-  async removeFollow(followerId: number, followingId: number): Promise<void> {
-    try {
+  async removeFollow(followerId: number, arg2: number | string): Promise<void> {
+    if (typeof arg2 === 'number') {
+      // Local unfollow
+      const followingId = arg2;
       await db
         .delete(follows)
         .where(
@@ -216,9 +248,11 @@ export class DatabaseStorage implements IStorage {
             eq(follows.followingId, followingId)
           )
         );
-    } catch (error) {
-      console.error("Error in removeFollow:", error);
-      throw error;
+    } else {
+      // Remote unfollow
+      const remoteDid = arg2;
+      await db.delete(follows)
+        .where(and(eq(follows.followerId, followerId), eq(follows.remoteDid, remoteDid)));
     }
   }
   
@@ -252,8 +286,8 @@ export class DatabaseStorage implements IStorage {
         .select({ followingId: follows.followingId })
         .from(follows)
         .where(eq(follows.followerId, userId));
-      
-      return followings.map(f => f.followingId);
+      // Filter out nulls to ensure number[]
+      return followings.map(f => f.followingId).filter((id): id is number => typeof id === 'number' && id !== null);
     } catch (error) {
       console.error("Error in getFollowedUserIds:", error);
       return [];
@@ -816,6 +850,38 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("Error in markAllNotificationsAsRead:", error);
       throw error;
+    }
+  }
+
+  async getFollow(followerId: number, remoteDid: string): Promise<Follow | undefined> {
+    try {
+      const [follow] = await db.select().from(follows)
+        .where(and(eq(follows.followerId, followerId), eq(follows.remoteDid, remoteDid)));
+      return follow;
+    } catch (error) {
+      console.error("Error in getFollow (remote):", error);
+      return undefined;
+    }
+  }
+
+  async getPostsByUserIds(userIds: number[], page?: number, limit?: number): Promise<Post[]> {
+    // Filter out nulls to avoid SQL errors
+    userIds = userIds.filter((id): id is number => typeof id === 'number' && id !== null);
+    if (!userIds.length) return [];
+    page = page ?? 1;
+    limit = limit ?? 10;
+    try {
+      const offset = (page - 1) * limit;
+      return await db
+        .select()
+        .from(posts)
+        .where(sql`${posts.userId} IN (${userIds.join(',')})`)
+        .orderBy(sql`${posts.createdAt} DESC`)
+        .limit(limit)
+        .offset(offset);
+    } catch (error) {
+      console.error("Error in getPostsByUserIds:", error);
+      return [];
     }
   }
 }

@@ -20,106 +20,75 @@ export default function RightSidebar() {
   });
 
   return (
-    <div className="hidden md:block md:w-72 lg:w-80 xl:w-96 fixed right-0 top-16 bottom-0 overflow-auto p-4">
-      {/* Search bar for larger screens */}
-      <div className="mb-6 md:hidden lg:block">
-        <div className="relative">
-          <input
-            type="text"
-            placeholder={t("nav.search")}
-            className="w-full py-2 pl-10 pr-4 bg-neutral-100 dark:bg-neutral-800 rounded-full focus:outline-none focus:ring-2 focus:ring-primary-500"
-          />
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-neutral-600 dark:text-neutral-300 absolute left-3 top-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-        </div>
-      </div>
-
-      {/* Trends section */}
-      <div className="bg-background rounded-xl border border-neutral-300 dark:border-neutral-800 mb-4">
-        <div className="p-4 border-b border-neutral-300 dark:border-neutral-800">
-          <h2 className="font-bold text-xl">{t("trending.title")}</h2>
-        </div>
-        
+    <div className="space-y-6">
+      {/* Trending Widget */}
+      <div className="rounded-lg border bg-neutral-50 dark:bg-dark-bg/40 p-4 space-y-3">
+        <h2 className="font-bold text-lg mb-2">{t("trending.title")}</h2>
         {trends.length > 0 ? (
-          <div className="divide-y divide-neutral-300 dark:divide-neutral-800">
-            {trends.map((trend) => (
+          <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
+            {trends.slice(0, 5).map((trend) => (
               <Link key={trend.id} href={`/trends/${trend.tag}`}>
-                <a className="block p-4 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors">
-                  <div className="text-sm text-neutral-600 dark:text-neutral-300">{trend.category}</div>
-                  <div className="font-semibold">#{trend.tag}</div>
-                  <div className="text-sm text-neutral-600 dark:text-neutral-300 mt-1">
-                    {trend.postCount.toLocaleString()} {t("trending.posts")}
+                <a className="block py-3 hover:bg-neutral-100 dark:hover:bg-dark-bg/60 rounded transition-colors">
+                  <div className="text-xs text-neutral-500 dark:text-neutral-300 mb-1">{trend.category}</div>
+                  <div className="font-semibold text-neutral-700 dark:text-neutral-100">#{trend.tag}</div>
+                  <div className="text-xs text-neutral-500 dark:text-neutral-300 mt-1">
+                    {trend.postCount.toLocaleString()} {t("trending.posts", { count: trend.postCount })}
                   </div>
                 </a>
               </Link>
             ))}
           </div>
         ) : (
-          <div className="p-4 text-center text-neutral-600 dark:text-neutral-300">
-            {t("trending.empty")}
-          </div>
+          <div className="py-6 text-center text-neutral-500 dark:text-neutral-300">{t("trending.empty")}</div>
         )}
-        
-        <div className="p-3 border-t border-neutral-300 dark:border-neutral-800">
+        <div className="pt-3 border-t border-neutral-200 dark:border-neutral-800 text-right">
           <Link href="/trending">
-            <a className="text-primary-500 text-sm hover:underline">
-              {t("trending.showMore")}
+            <a className="text-primary-500 text-sm font-medium hover:underline">
+              {t("trending.showMore")} <span aria-hidden>▶</span>
             </a>
           </Link>
         </div>
       </div>
 
-      {/* Suggested users section */}
-      <div className="bg-background rounded-xl border border-neutral-300 dark:border-neutral-800">
-        <div className="p-4 border-b border-neutral-300 dark:border-neutral-800">
-          <h2 className="font-bold text-xl">{t("suggested.title")}</h2>
-        </div>
-        
+      {/* Who to Follow Widget */}
+      <div className="rounded-lg border bg-neutral-50 dark:bg-dark-bg/40 p-4 space-y-3">
+        <h2 className="font-bold text-lg mb-2">{t("suggested.title")}</h2>
         {suggestedUsers.length > 0 ? (
-          <div className="divide-y divide-neutral-300 dark:divide-neutral-800">
+          <div className="divide-y divide-neutral-200 dark:divide-neutral-800">
             {suggestedUsers.slice(0, 3).map((user) => (
-              <div key={user.id} className="p-4">
-                <div className="flex items-center justify-between">
-                  <Link href={`/profile/${user.username}`}>
-                    <a className="flex items-center">
-                      <Avatar className="h-10 w-10 mr-3">
-                        <AvatarImage src={user.profileImage} alt={user.name} />
-                        <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="font-semibold line-clamp-1">{user.name}</div>
-                        <div className="text-sm text-neutral-600 dark:text-neutral-300">@{user.username}</div>
-                      </div>
-                    </a>
-                  </Link>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="ml-2 rounded-full border-primary-500 text-primary-500 hover:bg-primary-500 hover:text-white transition-colors"
-                    onClick={() => {
-                      apiRequest(`/api/users/${user.id}/follow`, {
-                        method: 'POST',
-                      });
-                    }}
-                  >
-                    {t("user.follow")}
-                  </Button>
-                </div>
+              <div key={user.id} className="py-3 flex items-center justify-between">
+                <Link href={`/profile/${user.username}`}>
+                  <a className="flex items-center">
+                    <Avatar className="h-9 w-9 mr-3">
+                      <AvatarImage src={user.profileImage} alt={user.name} />
+                      <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                    <div>
+                      <div className="font-semibold text-neutral-700 dark:text-neutral-100 line-clamp-1">{user.name}</div>
+                      <div className="text-xs text-neutral-500 dark:text-neutral-300">@{user.username}</div>
+                    </div>
+                  </a>
+                </Link>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-2 rounded-full border-primary-500 text-primary-500 hover:bg-primary-500 hover:text-white transition-colors"
+                  onClick={() => {
+                    apiRequest('POST', `/api/users/${user.id}/follow`);
+                  }}
+                >
+                  {t("user.follow")}
+                </Button>
               </div>
             ))}
           </div>
         ) : (
-          <div className="p-4 text-center text-neutral-600 dark:text-neutral-300">
-            {t("suggested.empty")}
-          </div>
+          <div className="py-6 text-center text-neutral-500 dark:text-neutral-300">{t("suggested.empty")}</div>
         )}
-        
-        <div className="p-3 border-t border-neutral-300 dark:border-neutral-800">
+        <div className="pt-3 border-t border-neutral-200 dark:border-neutral-800 text-right">
           <Link href="/explore/people">
-            <a className="text-primary-500 text-sm hover:underline">
-              {t("suggested.showMore")}
+            <a className="text-primary-500 text-sm font-medium hover:underline">
+              {t("suggested.showMore")} <span aria-hidden>▶</span>
             </a>
           </Link>
         </div>

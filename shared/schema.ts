@@ -15,7 +15,10 @@ export const users = pgTable("users", {
   isVerified: boolean("is_verified").notNull().default(false),
   language: text("language").notNull().default("en"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-  unreadNotifications: integer("unread_notifications").notNull().default(0)
+  unreadNotifications: integer("unread_notifications").notNull().default(0),
+  did: text("did").unique(), // Decentralized Identifier (DID)
+  publicKey: text("public_key"), // Public key for signature verification
+  homeNode: text("home_node") // URL or DID of the user's home node
 });
 
 // Post model
@@ -33,7 +36,9 @@ export const posts = pgTable("posts", {
 export const follows = pgTable("follows", {
   id: serial("id").primaryKey(),
   followerId: integer("follower_id").notNull(),
-  followingId: integer("following_id").notNull(),
+  followingId: integer("following_id"), // nullable for remote follows
+  remoteDid: text("remote_did"), // nullable, set for remote follows
+  remoteNode: text("remote_node"), // nullable, set for remote follows
   createdAt: timestamp("created_at").notNull().defaultNow()
 });
 
@@ -121,7 +126,10 @@ export const insertUserSchema = createInsertSchema(users).pick({
   bio: true,
   profileImage: true,
   coverImage: true,
-  language: true
+  language: true,
+  did: true,
+  publicKey: true,
+  homeNode: true
 });
 
 export const insertPostSchema = createInsertSchema(posts).pick({
@@ -134,7 +142,9 @@ export const insertPostSchema = createInsertSchema(posts).pick({
 
 export const insertFollowSchema = createInsertSchema(follows).pick({
   followerId: true,
-  followingId: true
+  followingId: true,
+  remoteDid: true,
+  remoteNode: true
 });
 
 export const insertPostInteractionSchema = createInsertSchema(postInteractions).pick({

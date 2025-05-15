@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { generateDidAndStoreKey } from '@/lib/did';
 
 const registerSchema = z.object({
   name: z.string().min(2, "Name must be at least 2 characters"),
@@ -61,9 +62,30 @@ export default function Register() {
     }
   });
 
-  const onSubmit = (values: RegisterFormValues) => {
+  const onSubmit = async (values: RegisterFormValues) => {
     setIsSubmitting(true);
-    registerMutation.mutate(values);
+    try {
+      // Generate DID and keypair client-side
+      const { did, publicJwk } = await generateDidAndStoreKey();
+      // Prepare registration payload
+      const payload = {
+        ...values,
+        did,
+        publicKey: JSON.stringify(publicJwk),
+        homeNode: window.location.origin // Use current origin as home node for now
+      };
+      
+      console.log("Submitting to /api/auth/register with payload:", payload);
+      
+      registerMutation.mutate(payload);
+    } catch (error) {
+      toast({
+        title: 'Registration failed',
+        description: 'Failed to generate decentralized identity. Please try again.',
+        variant: 'destructive',
+      });
+      setIsSubmitting(false);
+    }
   };
 
   return (

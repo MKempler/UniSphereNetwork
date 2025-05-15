@@ -6,9 +6,42 @@ import { generateTranslation, detectLanguage } from "./translation";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
+// @ts-ignore: No type definitions for @decentralized-identity/ion-tools
+import * as Ion from '@decentralized-identity/ion-tools';
+import { and, eq } from "drizzle-orm";
+// @ts-ignore: No type definitions for node-fetch (should be resolved by @types/node-fetch, but just in case)
+import fetch from "node-fetch";
+import { sql } from "drizzle-orm";
+import { follows } from "../shared/schema";
+import { db } from "./db";
+import bcrypt from "bcrypt";
+import crypto from 'crypto';
 
-// Simple session handling
-const sessions: Record<string, { userId: number }> = {};
+interface SessionData {
+  userId: number;
+  username: string;
+  did: string | null;
+}
+const sessions: Record<string, SessionData> = {};
+
+// Node identity (did:web) config
+const NODE_DID = process.env.NODE_DID || "did:web:localhost";
+const NODE_PUBLIC_KEY = process.env.NODE_PUBLIC_KEY || "<replace-with-your-public-key>";
+const NODE_DID_DOC = {
+  "@context": "https://www.w3.org/ns/did/v1",
+  id: NODE_DID,
+  verificationMethod: [
+    {
+      id: `${NODE_DID}#key-1`,
+      type: "JsonWebKey2020",
+      controller: NODE_DID,
+      publicKeyJwk: JSON.parse(NODE_PUBLIC_KEY)
+    }
+  ],
+  authentication: [
+    `${NODE_DID}#key-1`
+  ]
+};
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware to check authentication
@@ -48,6 +81,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Format post helper
   const formatPost = async (post: any, currentUserId?: number) => {
     const author = await storage.getUser(post.userId);
+    if (!author) {
+      // If author is not found, return null or a fallback object
+      return null;
+    }
     const likeCount = await storage.getPostInteractionCount(post.id, "like");
     const commentCount = await storage.getPostInteractionCount(post.id, "comment");
     const repostCount = await storage.getPostInteractionCount(post.id, "repost");
@@ -105,7 +142,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ...userWithoutPassword,
       followers,
       following,
-      isFollowing
+      isFollowing,
+      did: user.did,
+      publicKey: user.publicKey
     };
   };
 
@@ -124,64 +163,167 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Authentication Routes
   app.post("/api/auth/register", async (req, res) => {
+    const { name, username, email, password, did, publicKey, homeNode } = req.body;
+
+    console.log('[/api/auth/register] Received request:');
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    console.log('Body:', JSON.stringify(req.body, null, 2));
+
+    if (!name || !username || !email || !password || !did || !publicKey || !homeNode) {
+      return res.status(400).json({ message: 'All fields are required, including did, publicKey, and homeNode.' });
+    }
+    if (!/\S+@\S+\.\S+/.test(email)) {
+      return res.status(400).json({ message: 'Invalid email format.' });
+    }
+    const hashedPassword = await bcrypt.hash(password, 10);
+    let parsedPublicKey;
     try {
-      const userData = insertUserSchema.parse(req.body);
-      const existingUser = await storage.getUserByUsername(userData.username);
-      
-      if (existingUser) {
-        return res.status(400).json({ message: "Username already exists" });
+      parsedPublicKey = JSON.parse(publicKey);
+    } catch (e) {
+      console.error('[/api/auth/register] Failed to parse publicKey JSON:', publicKey, e);
+      return res.status(400).json({ message: "Invalid publicKey format. Should be a JSON string." });
+    }
+
+    try {
+      console.log('[/api/auth/register] Attempting to resolve DID:', did);
+      const didDocumentResolution = await Ion.resolve(did);
+      console.log('[/api/auth/register] DID resolved. Resolution object:', JSON.stringify(didDocumentResolution, null, 2));
+
+      if (!didDocumentResolution || !didDocumentResolution.didDocument) {
+        console.error('[/api/auth/register] Ion.resolve did not return a valid DID document structure for DID:', did);
+        return res.status(400).json({ message: "Failed to resolve DID: No DID document found in resolution result." });
       }
       
-      const existingEmail = await storage.getUserByEmail(userData.email);
-      if (existingEmail) {
-        return res.status(400).json({ message: "Email already in use" });
+      const didDocument = didDocumentResolution.didDocument;
+      let actualPublicKeyJwk = null;
+
+      // Corrected logic to find the public key based on DID Document structure
+      if (didDocument.verificationMethod && Array.isArray(didDocument.verificationMethod)) {
+        for (const vm of didDocument.verificationMethod) {
+          if (vm.id && vm.publicKeyJwk) {
+            // Check if this verification method is used for authentication or assertion
+            const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === vm.id) || (typeof auth === 'object' && auth?.id === vm.id));
+            const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === vm.id) || (typeof assert === 'object' && assert?.id === vm.id));
+            
+            // DID Core spec allows purposes to be directly in verificationMethod too, though ion-tools output seems to use the reference model primarily.
+            // We check for direct purposes as a fallback.
+            const directPurposes = vm.purposes && Array.isArray(vm.purposes) && (vm.purposes.includes('authentication') || vm.purposes.includes('assertionMethod'));
+
+            if (isAuthMethod || isAssertionMethod || directPurposes) {
+              actualPublicKeyJwk = vm.publicKeyJwk;
+              console.log(`[/api/auth/register] Found matching publicKeyJwk in verificationMethod with id: ${vm.id}`);
+              break; // Found the key
+            }
+          }
+        }
+      }
+
+      if (!actualPublicKeyJwk) {
+          // Fallback: Check the deprecated `publicKey` section if it exists (less common for ION DIDs but good for robustness)
+          if (didDocument.publicKey && Array.isArray(didDocument.publicKey)) {
+              console.log('[/api/auth/register] Checking deprecated publicKey array in DID document.');
+              for (const pk of didDocument.publicKey) {
+                  if (pk.id && pk.publicKeyJwk && pk.type === 'EcdsaSecp256k1VerificationKey2019') {
+                       // Check if this public key is referenced in authentication or assertionMethod
+                      const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === pk.id) || (typeof auth === 'object' && auth?.id === pk.id));
+                      const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === pk.id) || (typeof assert === 'object' && assert?.id === pk.id));
+                      
+                      if (isAuthMethod || isAssertionMethod) {
+                          actualPublicKeyJwk = pk.publicKeyJwk;
+                          console.log(`[/api/auth/register] Found matching publicKeyJwk in deprecated publicKey array with id: ${pk.id}`);
+                          break;
+                      }
+                  }
+              }
+          }
+      }
+
+      if (!actualPublicKeyJwk) {
+          console.error('[/api/auth/register] Could not find a suitable public key in DID document for DID:', did, 'Document:', JSON.stringify(didDocument, null, 2));
+          return res.status(400).json({ message: "Failed to extract a suitable public key from DID document for validation." });
       }
       
-      const newUser = await storage.createUser(userData);
-      res.status(201).json({ message: "User registered successfully" });
-    } catch (error) {
-      handleError(error, res);
+      const providedKeyString = JSON.stringify(parsedPublicKey, Object.keys(parsedPublicKey).sort());
+      const resolvedKeyString = JSON.stringify(actualPublicKeyJwk, Object.keys(actualPublicKeyJwk).sort());
+
+      console.log('[/api/auth/register] Provided PublicKey for comparison:', providedKeyString);
+      console.log('[/api/auth/register] Resolved PublicKeyJwk from DID for comparison:', resolvedKeyString);
+
+      if (providedKeyString !== resolvedKeyString) {
+        console.error('[/api/auth/register] Public key mismatch. Provided:', providedKeyString, 'Resolved from DID:', resolvedKeyString);
+        return res.status(400).json({ message: "Public key mismatch between provided key and DID document." });
+      }
+      console.log('[/api/auth/register] DID and PublicKey validated successfully.');
+
+    } catch (error: any) {
+      console.error('[/api/auth/register] Error during DID resolution/validation for DID:', did, error);
+      return res.status(400).json({ message: "Failed to resolve/validate DID.", errorName: error.name, errorMessage: error.message });
+    }
+
+    try {
+      const newUser = await storage.createUser({
+        name,
+        username,
+        email,
+        password: hashedPassword,
+        did,
+        publicKey: JSON.stringify(parsedPublicKey),
+        homeNode
+      });
+
+      if (!newUser) {
+        console.error('[/api/auth/register] User creation failed after validation.');
+        return res.status(500).json({ message: 'User creation failed.' });
+      }
+      
+      const userDidForSession: string | null = newUser.did ?? null;
+
+      const sessionId = crypto.randomBytes(16).toString('hex');
+      sessions[sessionId] = { userId: newUser.id, username: newUser.username, did: userDidForSession };
+      console.log(`[/api/auth/register] User ${newUser.username} registered. Session created: ${sessionId}`);
+      res.cookie('connect.sid', sessionId, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+      res.status(201).json({
+          message: "User registered successfully",
+          user: await formatUser(newUser),
+          sessionId: sessionId
+      });
+
+    } catch (error: any) {
+      console.error('[/api/auth/register] Error during user creation or session handling:', error);
+      if (error.code === '23505') { 
+          if (error.constraint === 'users_username_key') {
+              return res.status(400).json({ message: 'Username already exists.' });
+          }
+          if (error.constraint === 'users_email_key') {
+              return res.status(400).json({ message: 'Email already in use.' });
+          }
+          if (error.constraint === 'users_did_key') {
+              return res.status(400).json({ message: 'DID already registered.' });
+          }
+      }
+      res.status(500).json({ message: 'Error registering user.', error: error.message });
     }
   });
 
   app.post("/api/auth/login", async (req, res) => {
-    try {
-      console.log("Login attempt:", req.body);
-      
-      const loginData = loginSchema.parse(req.body);
-      console.log("Validated login data:", loginData);
-      
-      const user = await storage.getUserByUsername(loginData.username);
-      console.log("User found:", user ? `ID: ${user.id}, username: ${user.username}` : "No user found");
-      
-      if (!user) {
-        console.log(`Login failed: User '${loginData.username}' not found`);
-        return res.status(401).json({ message: "Invalid username or password" });
-      }
-      
-      if (user.password !== loginData.password) {
-        console.log(`Login failed: Password mismatch for user '${loginData.username}'`);
-        return res.status(401).json({ message: "Invalid username or password" });
-      }
-      
-      // Generate a secure session ID
-      const sessionId = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
-      sessions[sessionId] = { userId: user.id };
-      
-      console.log(`Login successful - Created session ${sessionId} for user ${user.id}`);
-      console.log(`Total active sessions: ${Object.keys(sessions).length}`);
-      
-      const formattedUser = await formatUser(user);
-      
-      res.status(200).json({ 
-        message: "Login successful",
-        sessionId,
-        user: formattedUser
-      });
-    } catch (error) {
-      console.error("Login error:", error);
-      handleError(error, res);
+    const { username, password } = req.body;
+    if (!username || !password) {
+      return res.status(400).json({ message: 'Username and password are required.' });
     }
+    const user = await storage.getUserByUsername(username);
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ message: 'Invalid credentials.' });
+    }
+    const sessionId = crypto.randomBytes(16).toString('hex');
+    // Update session creation to include all fields for SessionData
+    sessions[sessionId] = { userId: user.id, username: user.username, did: user.did ?? null };
+    console.log(`[/api/auth/login] User ${user.username} logged in. Session created: ${sessionId}`);
+    res.cookie('connect.sid', sessionId, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+    res.json({ 
+        message: 'Logged in successfully', 
+        user: await formatUser(user),
+        sessionId: sessionId
+    });
   });
 
   app.post("/api/auth/logout", (req, res) => {
@@ -268,23 +410,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Follow/Unfollow User
+  // Follow/Unfollow User (supports local and remote follows)
   app.post("/api/users/:id/follow", authMiddleware, async (req, res) => {
     try {
       const targetUserId = parseInt(req.params.id);
       const currentUserId = req.body.currentUserId;
-      
+      const { targetDid, targetNode } = req.body; // for remote follows
+
+      // If targetDid is provided, this is a remote follow
+      if (targetDid && targetNode) {
+        // Check if already following
+        const existing = await storage.getFollow(currentUserId, targetDid);
+        if (existing) {
+          // Unfollow remote
+          await storage.removeFollow(currentUserId, targetDid);
+          return res.status(200).json({ message: "Unfollowed remote user successfully" });
+        } else {
+          // Fetch remote profile (optional: cache it)
+          try {
+            const remoteProfileRes = await fetch(`${targetNode}/api/federation/user/${encodeURIComponent(targetDid)}`);
+            if (!remoteProfileRes.ok) throw new Error('Remote user not found');
+            // Optionally cache remote profile here
+          } catch (e) {
+            return res.status(404).json({ message: "Remote user not found or node unreachable" });
+          }
+          // Follow remote
+          await storage.addFollow(currentUserId, targetDid);
+          return res.status(200).json({ message: "Followed remote user successfully" });
+        }
+      }
+
+      // Otherwise, this is a local follow
       if (currentUserId === targetUserId) {
         return res.status(400).json({ message: "You cannot follow yourself" });
       }
-      
       const targetUser = await storage.getUser(targetUserId);
       if (!targetUser) {
         return res.status(404).json({ message: "User not found" });
       }
-      
       const isAlreadyFollowing = await storage.isFollowing(currentUserId, targetUserId);
-      
       if (isAlreadyFollowing) {
         await storage.removeFollow(currentUserId, targetUserId);
         res.status(200).json({ message: "Unfollowed successfully" });
@@ -331,26 +495,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const currentUserId = req.headers.authorization ? 
         sessions[req.headers.authorization.split(" ")[1]]?.userId : undefined;
       
-      let posts;
+      let posts: any[] = [];
       if (feedType === "following" && currentUserId) {
-        posts = await storage.getFollowingPosts(currentUserId, page, limit);
+        // Get local follows
+        const localFollows = await db.select().from(follows)
+          .where(and(eq(follows.followerId, currentUserId), sql`remote_did IS NULL`));
+        const localFollowingIds = localFollows.map(f => f.followingId).filter((id): id is number => typeof id === 'number' && id !== null);
+        if (localFollowingIds.length > 0) {
+          const localPosts = await storage.getPostsByUserIds(localFollowingIds, page, limit);
+          posts = posts.concat(localPosts);
+        }
+        // Get remote follows
+        const remoteFollows = await db.select().from(follows)
+          .where(and(eq(follows.followerId, currentUserId), sql`remote_did IS NOT NULL`));
+        for (const follow of remoteFollows) {
+          if (follow.remoteNode && follow.remoteDid) {
+            try {
+              const remotePostsRes = await fetch(`${follow.remoteNode}/api/federation/posts/${encodeURIComponent(follow.remoteDid)}`);
+              if (remotePostsRes.ok) {
+                const remotePosts = await remotePostsRes.json();
+                posts = posts.concat(remotePosts);
+              }
+            } catch (e) {
+              // Ignore remote fetch errors for now
+            }
+          }
+        }
       } else if (feedType === "circuits" && currentUserId) {
         posts = await storage.getCircuitPosts(currentUserId, page, limit);
       } else {
         posts = await storage.getAllPosts(page, limit);
       }
-      
-      const formattedPosts = await Promise.all(
-        posts.map(post => formatPost(post, currentUserId))
-      );
-      
-      const totalPosts = await storage.getPostCount(feedType, currentUserId);
-      const totalPages = Math.ceil(totalPosts / limit);
-      
+      // Sort posts by createdAt descending
+      posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      // Paginate
+      const pagedPosts = posts.slice(0, limit);
       res.status(200).json({
-        posts: formattedPosts,
+        posts: pagedPosts,
         page,
-        totalPages
+        totalPages: Math.ceil(posts.length / limit)
       });
     } catch (error) {
       handleError(error, res);
@@ -503,7 +686,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: circuit.name,
           description: circuit.description,
           creatorId: circuit.creatorId,
-          creatorName: creator.name,
+          creatorName: creator?.name,
           color: circuit.color,
           type: circuit.type,
           subscriberCount,
@@ -584,6 +767,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const language = await detectLanguage(text);
       res.status(200).json({ language });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Serve the node's DID document at /.well-known/did.json
+  app.get('/.well-known/did.json', (req, res) => {
+    res.json(NODE_DID_DOC);
+  });
+
+  // Also serve at /api/node/info for convenience
+  app.get('/api/node/info', (req, res) => {
+    res.json({
+      did: NODE_DID,
+      publicKey: NODE_PUBLIC_KEY,
+      didDocument: NODE_DID_DOC
+    });
+  });
+
+  // Federation endpoint: fetch user profile by DID
+  app.get('/api/federation/user/:did', async (req, res) => {
+    try {
+      const did = decodeURIComponent(req.params.did);
+      const user = await storage.getUserByDid(did);
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      res.json(await formatUser(user));
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Federation endpoint: fetch public posts by user DID
+  app.get('/api/federation/posts/:did', async (req, res) => {
+    try {
+      const did = decodeURIComponent(req.params.did);
+      const user = await storage.getUserByDid(did);
+      if (!user) {
+        return res.status(404).json({ message: 'User not found' });
+      }
+      const posts = await storage.getUserPosts(user.id);
+      res.json(posts);
     } catch (error) {
       handleError(error, res);
     }
