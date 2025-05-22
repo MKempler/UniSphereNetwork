@@ -147,21 +147,21 @@ export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFor
           <div className="flex items-center justify-between mt-3">
             <div className="flex items-center space-x-2">
               <button 
-                className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
+              className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
                 title="Add media"
                 disabled={isSubmitting}
               >
                 <Image className="h-5 w-5" />
               </button>
               <button 
-                className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
+              className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
                 title="Create poll"
                 disabled={isSubmitting}
               >
                 <MessageSquarePlus className="h-5 w-5" />
               </button>
               <button 
-                className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
+              className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
                 title="Add emoji"
                 disabled={isSubmitting}
               >
@@ -171,7 +171,7 @@ export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFor
               {/* Language selector */}
               <div className="relative ml-1">
                 <button 
-                  className="flex items-center text-primary text-sm px-2 py-1 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500"
+                className="flex items-center text-primary text-sm px-2 py-1 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500"
                   disabled={isSubmitting}
                 >
                   <span className="flex items-center">

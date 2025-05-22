@@ -2,60 +2,83 @@ import React from 'react';
 import { useQuery, useMutation, useQueryClient, QueryKey } from '@tanstack/react-query';
 import { Link, useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { PlusCircle, Users, MessageSquare, CheckCircle, Circle, Search } from 'lucide-react';
+import { PlusCircle, ChevronRight, Sparkles, TrendingUp, Music4, Lightbulb, Tv, MessageCircle, ShieldCheck, Bone, Newspaper, Gamepad2, Palette, Dumbbell } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import type { CircuitListItem } from '@/types/circuit'; // Assuming types are defined here
+import type { CircuitListItem } from '@/types/circuit';
 import { apiRequest } from '@/lib/queryClient';
 import { useUser } from '@/lib/UserContext';
-import CircuitCard from '@/components/circuits/CircuitCard';
 import CircuitSkeleton from '@/components/circuits/CircuitSkeleton';
-import clsx from 'clsx';
-import { useState, useMemo } from 'react';
 import MainShell from '@/components/MainShell';
 import SideNav from '@/components/layout/LeftSidebar';
 import RightSidebar from '@/components/layout/RightSidebar';
+import DynamicCircuitCard from '@/components/circuits/DynamicCircuitCard';
+import Masonry from 'react-masonry-css';
 
-const fetchPopularCircuits = async (): Promise<CircuitListItem[]> => {
-  const popularCircuitsData = await apiRequest('GET', '/api/circuits/popular');
-  // No need to check response.ok or call response.json() here,
-  // apiRequest handles errors and returns parsed data.
-  
-  // It's good practice to ensure the data is an array as expected.
-  if (!Array.isArray(popularCircuitsData)) {
-    console.error("Expected array from /api/circuits/popular, got:", popularCircuitsData);
-    // Optionally throw a more specific error or return a default value like an empty array
-    throw new Error('Invalid data format received for popular circuits.'); 
-  }
-  return popularCircuitsData;
+// Icon mapping for categories
+const ICON_MAP: Record<string, React.ElementType> = {
+  'Sparkles': Sparkles,
+  'TrendingUp': TrendingUp,
+  'Music4': Music4,
+  'Lightbulb': Lightbulb,
+  'Tv': Tv,
+  'Bone': Bone,
+  'Dumbbell': Dumbbell,
+  'Newspaper': Newspaper,
+  'Gamepad2': Gamepad2,
+  'Palette': Palette,
+  'MessageCircle': MessageCircle,
+  'HelpCircle': MessageCircle, // fallback
 };
 
-const FILTERS = [
-  { key: 'all', label: 'All' },
-  { key: 'trending', label: 'Trending' },
-  { key: 'subscribed', label: 'Your subs' },
-  { key: 'new', label: 'New' },
+// Predefined sections (suggested and trending are special)
+const PREDEFINED_SECTIONS = [
+  { name: 'Suggested for you', circuitsKey: 'suggested', description: 'Circuits we think you\'ll like.', icon: Sparkles },
+  { name: 'Trending Circuits', circuitsKey: 'trending', description: 'Popular and buzzing right now.', icon: TrendingUp },
 ];
 
-const CircuitsPage: React.FC = () => {
-  const queryClient = useQueryClient();
-  const { user } = useUser();
-  const [, navigate] = useLocation();
-  const { toast } = useToast();
-  const [search, setSearch] = useState('');
-  const [activeFilter, setActiveFilter] = useState('all');
-  const [searchInput, setSearchInput] = useState('');
+// Fetch circuits by category using real API
+const fetchCircuitsByCategory = async (categoryKey: string): Promise<CircuitListItem[]> => {
+  let endpoint: string;
+  
+  // Handle special sections
+  switch (categoryKey) {
+    case 'suggested':
+      endpoint = '/api/circuits/suggested';
+      break;
+    case 'trending':
+      endpoint = '/api/circuits/trending';
+      break;
+    default:
+      // For real categories, use the category slug endpoint
+      endpoint = `/api/categories/${categoryKey}/circuits`;
+      break;
+  }
 
-  const { data: circuits, isLoading, error } = useQuery<CircuitListItem[], Error, CircuitListItem[], QueryKey>({
-    queryKey: ['popularCircuits'],
-    queryFn: fetchPopularCircuits,
+  const circuitsData = await apiRequest('GET', endpoint);
+  if (!Array.isArray(circuitsData)) {
+    console.error(`Expected array from ${endpoint}, got:`, circuitsData);
+    throw new Error(`Invalid data format received for ${categoryKey} circuits.`);
+  }
+
+  // Limit to 4 circuits per section for the main page
+  return circuitsData.slice(0, 4);
+};
+
+// RE-INTRODUCED and MODIFIED CircuitCategorySection
+const CircuitCategorySection: React.FC<{ categoryName: string; circuitsKey: string; description?: string; icon?: React.ElementType }> = ({ categoryName, circuitsKey, description, icon: CategoryIcon }) => {
+  const { data: circuits, isLoading, error } = useQuery<CircuitListItem[], Error>({
+    queryKey: ['circuits', circuitsKey], // Unique queryKey per category
+    queryFn: () => fetchCircuitsByCategory(circuitsKey),
   });
+  const { user } = useUser();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const subscribeMutation = useMutation<unknown, Error, number>({
-    mutationFn: (circuitId: number) => apiRequest('POST', `/api/circuits/${circuitId}/subscribe`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['popularCircuits'] });
-      queryClient.invalidateQueries({ queryKey: ['circuitDetail'] });
+  const subscribeMutation = useMutation<unknown, Error, { circuitId: number, queryKeyToInvalidate: QueryKey }>({
+    mutationFn: ({ circuitId }) => apiRequest('POST', `/api/circuits/${circuitId}/subscribe`),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: variables.queryKeyToInvalidate });
+      queryClient.invalidateQueries({ queryKey: ['circuitDetail', variables.circuitId] });
       toast({ title: 'Subscribed successfully!' });
     },
     onError: (err: Error) => {
@@ -63,11 +86,11 @@ const CircuitsPage: React.FC = () => {
     },
   });
 
-  const unsubscribeMutation = useMutation<unknown, Error, number>({
-    mutationFn: (circuitId: number) => apiRequest('DELETE', `/api/circuits/${circuitId}/subscribe`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['popularCircuits'] });
-      queryClient.invalidateQueries({ queryKey: ['circuitDetail'] });
+  const unsubscribeMutation = useMutation<unknown, Error, { circuitId: number, queryKeyToInvalidate: QueryKey }>({
+    mutationFn: ({ circuitId }) => apiRequest('DELETE', `/api/circuits/${circuitId}/subscribe`),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: variables.queryKeyToInvalidate });
+      queryClient.invalidateQueries({ queryKey: ['circuitDetail', variables.circuitId] });
       toast({ title: 'Unsubscribed successfully!' });
     },
     onError: (err: Error) => {
@@ -75,110 +98,133 @@ const CircuitsPage: React.FC = () => {
     },
   });
 
-  // Debounce search input
-  useMemo(() => {
-    const handler = setTimeout(() => setSearch(searchInput), 300);
-    return () => clearTimeout(handler);
-  }, [searchInput]);
+  // Masonry breakpoint columns for use within sections if we choose Masonry
+   const breakpointColumnsObj = {
+    default: 4, // Max 4 cards in a row for sections on large screens
+    1100: 3,
+    768: 2,
+    640: 1 // On small screens, 1 card per row (full width)
+  };
 
-  // Filtered circuits
-  const filteredCircuits = useMemo(() => {
-    if (!circuits) return [];
-    let filtered = circuits;
-    if (search) {
-      filtered = filtered.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
-    }
-    if (activeFilter === 'trending') {
-      // TODO: implement trending logic if available
-      return filtered;
-      }
-    if (activeFilter === 'subscribed') {
-      return filtered.filter(c => c.isSubscribed);
-    }
-    if (activeFilter === 'new') {
-      return [...filtered].sort((a, b) => b.id - a.id);
-    }
-    return filtered;
-  }, [circuits, search, activeFilter]);
 
-  if (isLoading) return <div className="text-center p-10">Loading circuits...</div>;
-  if (error) return <div className="text-center p-10 text-red-500">Error loading circuits: {error.message}</div>;
+  if (error) return (
+    <section className="mb-12">
+      <h2 className="text-2xl font-bold text-neutral-800 mb-1 px-4 md:px-0">{categoryName}</h2>
+      {description && <p className="text-sm text-neutral-500 mb-4 px-4 md:px-0">{description}</p>}
+      <div className="text-red-500 py-4 px-4 md:px-0">Error loading {categoryName.toLowerCase()}: {error.message}</div>
+    </section>
+  );
+
+  // Decide on layout: Simple flex-wrap grid for now, or Masonry.
+  // For main page sections, a simpler responsive grid might be better than full Masonry.
+  // Masonry might be for "See All" pages.
+  // Let's use a flex-wrap grid for now to match mockup's row appearance.
+
+  return (
+    <section className="mb-12">
+      <div className="flex justify-between items-center mb-2 px-4 md:px-0">
+        <div>
+          <h2 className="text-3xl font-bold text-neutral-800">{categoryName}</h2>
+          {description && <p className="text-md text-neutral-500 mt-1">{description}</p>}
+        </div>
+        { (circuits && circuits.length > 3) && // Show "See all" if more than 3-4 items potentially available
+          <Link href={`/circuits/category/${circuitsKey}`} className="text-sm text-primary-600 hover:text-primary-700 flex items-center">
+            See all <ChevronRight className="ml-1 h-4 w-4" />
+          </Link>
+        }
+      </div>
+      
+      {isLoading ? (
+         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 px-4 md:px-0">
+          {Array.from({ length: 4 }).map((_, i) => <CircuitSkeleton key={i} />)}
+        </div>
+      ) : circuits && circuits.length > 0 ? (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6 px-4 md:px-0">
+          {/* Display up to 4 cards for preview, or all if less than 4 */}
+          {circuits.slice(0, 4).map(circuit => (
+            <DynamicCircuitCard
+              key={circuit.id}
+              circuit={circuit}
+              categoryIcon={CategoryIcon}
+              categoryKey={circuitsKey}
+              onSubscribe={() => subscribeMutation.mutate({ circuitId: circuit.id, queryKeyToInvalidate: ['circuits', circuitsKey] })}
+              onUnsubscribe={() => unsubscribeMutation.mutate({ circuitId: circuit.id, queryKeyToInvalidate: ['circuits', circuitsKey] })}
+              isSubscribing={subscribeMutation.isPending && subscribeMutation.variables?.circuitId === circuit.id}
+              isUnsubscribing={unsubscribeMutation.isPending && unsubscribeMutation.variables?.circuitId === circuit.id}
+              user={user}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="text-neutral-500 py-4 px-4 md:px-0">No circuits in this category yet.</p>
+      )}
+    </section>
+  );
+};
+
+
+const CircuitsPage: React.FC = () => {
+  const [, navigate] = useLocation();
+
+  // Fetch real categories from API
+  const { data: categories = [], isLoading: categoriesLoading } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => apiRequest('GET', '/api/categories'),
+  });
+
+  // Combine predefined sections with real categories
+  const allSections = React.useMemo(() => {
+    const categorySections = categories.map((category: any) => ({
+      name: category.name,
+      circuitsKey: category.slug,
+      description: category.description,
+      icon: ICON_MAP[category.icon] || ICON_MAP['HelpCircle'],
+    }));
+    
+    return [...PREDEFINED_SECTIONS, ...categorySections];
+  }, [categories]);
+
+  if (categoriesLoading) {
+    return (
+      <MainShell leftNav={<SideNav />} rightAside={<RightSidebar />}>
+        <div className="container mx-auto px-4 py-8">
+          <div className="text-center p-10">Loading categories...</div>
+        </div>
+      </MainShell>
+    );
+  }
 
   return (
     <MainShell leftNav={<SideNav />} rightAside={<RightSidebar />}>
-      <div className="max-w-[680px] w-full mx-auto flex flex-col gap-6">
-        {/* Sticky header toolbar */}
-        <div className="sticky top-0 z-10 bg-white/95 dark:bg-neutral-50/95 backdrop-blur border-b border-neutral-100 mb-4 pt-2 pb-2">
-          <div className="flex flex-wrap items-center gap-3 md:gap-4 pt-2">
-            <h1 className="text-2xl font-bold whitespace-nowrap flex-shrink-0">Social Circuits</h1>
-            <div className="flex overflow-auto no-scrollbar gap-2 max-w-full px-1 order-2 md:order-none">
-              {FILTERS.map(f => (
-                <button
-                  key={f.key}
-                  className={clsx(
-                    'px-3 py-1 rounded-full border border-neutral-200 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500',
-                    activeFilter === f.key
-                      ? 'bg-primary-500 text-white shadow'
-                      : 'bg-white text-neutral-700 hover:bg-neutral-100',
-                    'sm:text-xs md:text-sm'
-                  )}
-                  onClick={() => setActiveFilter(f.key)}
-                  aria-label={`Filter: ${f.label}`}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
-            <div className="relative w-full max-w-xs order-last md:order-none sm:max-w-[180px] flex-1 md:flex-initial">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 w-5 h-5" />
-              <input
-                type="text"
-                className="w-full pl-10 pr-3 py-2 rounded-full border border-neutral-200 bg-neutral-50 focus:ring-2 focus:ring-primary-500 focus:border-primary-500 outline-none text-sm"
-                placeholder="Search circuits..."
-                value={searchInput}
-                onChange={e => setSearchInput(e.target.value)}
-                aria-label="Search circuits"
-              />
+      <div className="container mx-auto px-4 py-8">
+        <div className="mb-16 text-center md:text-left relative">
+          <div className="max-w-3xl">
+            <h1 className="text-4xl md:text-5xl font-bold text-neutral-800 mb-3">
+              Jump into a circuit.
+            </h1>
+            <p className="text-lg text-neutral-600 mb-8">
+              Discover conversations and communities that matter to you.
+            </p>
             </div>
             <Button
-              className="ml-auto mt-2 md:mt-0 flex-shrink-0 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-full px-4 py-2 font-semibold shadow hover:from-primary-600 hover:to-primary-700 focus-visible:ring-2 focus-visible:ring-primary-500"
+            className="absolute top-0 right-0 mt-0 md:mt-2 bg-primary-500 hover:bg-primary-600 text-white rounded-lg px-6 py-3 font-semibold shadow-md hover:shadow-lg transition-all"
               onClick={() => navigate('/circuits/create')}
               aria-label="Create Circuit"
             >
-              <PlusCircle className="mr-2 h-5 w-5" />
+            <PlusCircle className="mr-2 h-5 w-5 sm:mr-1" />
               <span className="hidden sm:inline">Create Circuit</span>
             </Button>
-          </div>
         </div>
 
-        {/* Circuits grid */}
-        <div className="grid gap-5 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-          {isLoading ? (
-            Array.from({ length: 6 }).map((_, i) => <CircuitSkeleton key={i} />)
-          ) : filteredCircuits.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 col-span-full">
-              <MessageSquare className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-              <h2 className="text-xl font-semibold mb-2">Nothing here yet — create the first Circuit</h2>
-              <Button onClick={() => navigate('/circuits/create')} className="mt-2 bg-primary-500 text-white rounded-full px-4 py-2 font-semibold shadow">+ Create Circuit</Button>
-            </div>
-      ) : (
-            [
-              ...filteredCircuits.map(circuit => (
-                <CircuitCard
-                  key={circuit.id}
-                  circuit={circuit}
-                  onSubscribe={() => subscribeMutation.mutate(circuit.id)}
-                  onUnsubscribe={() => unsubscribeMutation.mutate(circuit.id)}
-                  isSubscribing={subscribeMutation.isPending && subscribeMutation.variables === circuit.id}
-                  isUnsubscribing={unsubscribeMutation.isPending && unsubscribeMutation.variables === circuit.id}
-                  user={user}
-                  role="listitem"
-                />
-              )),
-              ...(filteredCircuits.length < 3 ? Array.from({ length: 3 - filteredCircuits.length }).map((_, i) => <CircuitSkeleton key={`skeleton-${i}`} />) : [])
-            ]
-      )}
-    </div>
+        {allSections.map(section => (
+          <CircuitCategorySection
+            key={section.circuitsKey}
+            categoryName={section.name}
+            circuitsKey={section.circuitsKey}
+            description={section.description}
+            icon={section.icon}
+          />
+        ))}
       </div>
     </MainShell>
   );

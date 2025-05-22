@@ -180,3 +180,22 @@
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* React Masonry CSS styles */
+.my-masonry-grid {
+  display: -webkit-box; /* Not needed if autoprefixing */
+  display: -ms-flexbox; /* Not needed if autoprefixing */
+  display: flex;
+  margin-left: -12px; /* gutter size offset, adjust if your column padding changes from px-3 (12px) or px-2 (8px) */
+  width: auto;
+}
+
+.my-masonry-grid_column {
+  /* padding-left: 12px; column padding is now handled by Tailwind classes on the component */
+  background-clip: padding-box;
+}
+
+/* Style your items */
+.my-masonry-grid_column > div { /* Change 'div' to 'article' or whatever element you put in there */
+  /* margin-bottom: 12px; item bottom margin is now handled by Tailwind class on the item wrapper */
+}

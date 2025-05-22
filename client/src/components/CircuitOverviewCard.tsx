@@ -1,5 +1,5 @@
 import React from 'react';
-import { Users, Calendar, Globe, User } from 'lucide-react';
+import { Users, Calendar, Globe, User, Eye, EyeOff } from 'lucide-react';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 interface CircuitOverviewCardProps {
@@ -15,6 +15,8 @@ interface CircuitOverviewCardProps {
   createdAt: string;
   // Optional accent color
   accentColor?: string;
+  // Added isPublic prop
+  isPublic: boolean;
 }
 
 const CircuitOverviewCard: React.FC<CircuitOverviewCardProps> = ({
@@ -23,6 +25,7 @@ const CircuitOverviewCard: React.FC<CircuitOverviewCardProps> = ({
   creatorImage,
   subscriberCount = 0,
   createdAt,
+  isPublic,
   accentColor = 'hsl(215, 70%, 60%)'
 }) => {
   
@@ -81,10 +84,12 @@ const CircuitOverviewCard: React.FC<CircuitOverviewCardProps> = ({
           
           <div className="flex justify-between items-center py-2 border-t border-neutral-100 dark:border-neutral-700">
             <div className="flex items-center">
-              <Globe className="h-4 w-4 mr-2 text-neutral-500" />
+              {isPublic ? <Eye className="h-4 w-4 mr-2 text-neutral-500" /> : <EyeOff className="h-4 w-4 mr-2 text-neutral-500" />}
               <h4 className="text-sm font-medium text-neutral-700 dark:text-neutral-300">Visibility</h4>
             </div>
-            <span className="text-sm">Public</span>
+            <span className="text-sm font-medium">
+              {isPublic ? 'Public' : 'Private'}
+            </span>
           </div>
         </div>
       </div>

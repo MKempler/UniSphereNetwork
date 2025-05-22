@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage.ts";
-import { loginSchema, insertUserSchema, insertPostSchema } from "../shared/schema.ts";
+import { loginSchema, insertUserSchema, insertPostSchema, type Circuit, type Follow } from "../shared/schema.ts";
 import { detectLanguage, translateText } from "./translation.ts";
 import { z } from "zod";
 import { ZodError } from "zod";
@@ -792,7 +792,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Get local follows
         const localFollows = await db.select().from(follows)
           .where(and(eq(follows.followerId, currentUserId), sql`remote_did IS NULL`));
-        const localFollowingIds = localFollows.map(f => f.followingId).filter((id): id is number => typeof id === 'number' && id !== null);
+        const localFollowingIds = localFollows.map((f: Follow) => f.followingId).filter((id: number | null | undefined): id is number => typeof id === 'number' && id !== null);
         if (localFollowingIds.length > 0) {
           const localPosts = await storage.getPostsByUserIds(localFollowingIds, page, limit);
           posts = posts.concat(localPosts);
@@ -823,7 +823,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .limit(limit)
           .offset(offset);
         // Format relayed posts for the feed
-        posts = relayed.map(post => ({
+        posts = relayed.map((post: typeof relayed_posts.$inferSelect) => ({
           id: `relay-${post.id}`,
           content: post.content,
           media: post.media,
@@ -1027,34 +1027,195 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Categories API
+  app.get("/api/categories", async (req, res) => {
+    try {
+      const categories = await storage.getCategories();
+      res.status(200).json(categories);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.get("/api/categories/:slug/circuits", async (req, res) => {
+    try {
+      const { slug } = req.params;
+      const category = await storage.getCategoryBySlug(slug);
+      
+      if (!category) {
+        return res.status(404).json({ message: 'Category not found' });
+      }
+
+      const circuits = await storage.getCircuitsByCategory(category.id);
+      
+      let currentUserId = undefined;
+      if (req.session && req.session.userId !== undefined) {
+        currentUserId = req.session.userId;
+      }
+
+      // Format circuits with subscriber info like in popular circuits
+      const formattedCircuits = await Promise.all(
+        circuits.map(async (circuit) => {
+          let creator = null;
+          if (circuit.creatorId) {
+            creator = await storage.getUser(circuit.creatorId);
+          }
+          const subscriberCount = await storage.getCircuitSubscriberCount(circuit.id);
+          let isSubscribed = false;
+          
+          if (currentUserId) {
+            isSubscribed = await storage.isSubscribedToCircuit(currentUserId, circuit.id);
+          }
+          
+          return {
+            ...circuit,
+            creatorName: creator?.name,
+            creatorProfileImage: creator?.profileImage,
+            subscriberCount,
+            isSubscribed,
+            isPublic: circuit.isPublic === undefined ? true : circuit.isPublic,
+          };
+        })
+      );
+
+      res.status(200).json(formattedCircuits);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
   // Circuits (curated feeds)
+  app.get("/api/circuits/trending", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string || '10');
+      const circuits = await storage.getTrendingCircuits(limit);
+      
+      let currentUserId = undefined;
+      if (req.session && req.session.userId !== undefined) {
+        currentUserId = req.session.userId;
+      }
+
+      const formattedCircuits = await Promise.all(
+        circuits.map(async (circuit) => {
+          let creator = null;
+          if (circuit.creatorId) {
+            creator = await storage.getUser(circuit.creatorId);
+          }
+          const subscriberCount = await storage.getCircuitSubscriberCount(circuit.id);
+          let isSubscribed = false;
+          
+          if (currentUserId) {
+            isSubscribed = await storage.isSubscribedToCircuit(currentUserId, circuit.id);
+          }
+          
+          return {
+            ...circuit,
+            creatorName: creator?.name,
+            creatorProfileImage: creator?.profileImage,
+            subscriberCount,
+            isSubscribed,
+            isPublic: circuit.isPublic === undefined ? true : circuit.isPublic,
+          };
+        })
+      );
+
+      res.status(200).json(formattedCircuits);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.get("/api/circuits/suggested", async (req, res) => {
+    try {
+      const limit = parseInt(req.query.limit as string || '10');
+      let currentUserId = undefined;
+      
+      if (req.session && req.session.userId !== undefined) {
+        currentUserId = req.session.userId;
+      }
+
+      const circuits = await storage.getSuggestedCircuits(currentUserId, limit);
+
+      const formattedCircuits = await Promise.all(
+        circuits.map(async (circuit) => {
+          let creator = null;
+          if (circuit.creatorId) {
+            creator = await storage.getUser(circuit.creatorId);
+          }
+          const subscriberCount = await storage.getCircuitSubscriberCount(circuit.id);
+          let isSubscribed = false;
+          
+          if (currentUserId) {
+            isSubscribed = await storage.isSubscribedToCircuit(currentUserId, circuit.id);
+          }
+          
+          return {
+            ...circuit,
+            creatorName: creator?.name,
+            creatorProfileImage: creator?.profileImage,
+            subscriberCount,
+            isSubscribed,
+            isPublic: circuit.isPublic === undefined ? true : circuit.isPublic,
+          };
+        })
+      );
+
+      res.status(200).json(formattedCircuits);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
   app.get("/api/circuits/popular", async (req, res) => {
     try {
-      const currentUserId = req.headers.authorization ? 
-        req.session?.userId : undefined;
+      let currentUserId = undefined;
+      console.log(`[GET /api/circuits/popular] Headers: ${JSON.stringify(req.headers)}`);
+      console.log(`[GET /api/circuits/popular] Session before check: ${JSON.stringify(req.session)}`);
+
+      if (req.session && req.session.userId !== undefined) {
+        currentUserId = req.session.userId;
+        console.log(`[GET /api/circuits/popular] User ID from session: ${currentUserId}`);
+      } else {
+        console.log(`[GET /api/circuits/popular] No valid session user ID found for popular circuits.`);
+      }
       
-      const circuits = await storage.getPopularCircuits();
-      
-      const formattedCircuits = await Promise.all(circuits.map(async (circuit) => {
-        const creator = await storage.getUser(circuit.creatorId);
-        const subscriberCount = await storage.getCircuitSubscriberCount(circuit.id);
-        let isSubscribed = false;
-        
-        if (currentUserId) {
-          isSubscribed = await storage.isSubscribedToCircuit(currentUserId, circuit.id);
-        }
-        
-        return {
-          id: circuit.id,
-          name: circuit.name,
-          description: circuit.description,
-          creatorId: circuit.creatorId,
-          creatorName: creator?.name,
-          subscriberCount,
-          isSubscribed
-        };
-      }));
-      
+      const circuitsData = await storage.getPopularCircuits();
+
+      const formattedCircuits = await Promise.all(
+        circuitsData.map(async (circuit) => {
+          let creator = null;
+          if (circuit.creatorId) {
+            creator = await storage.getUser(circuit.creatorId);
+          }
+          const subscriberCount = await storage.getCircuitSubscriberCount(circuit.id);
+          let isSubscribed = false;
+          
+          if (currentUserId) {
+            isSubscribed = await storage.isSubscribedToCircuit(currentUserId, circuit.id);
+            console.log(`[GET /api/circuits/popular] Circuit ${circuit.id} isSubscribed: ${isSubscribed} for user ${currentUserId}`);
+          }
+          
+          return {
+            // Spread existing circuit properties
+            ...circuit, 
+            // Explicitly map core properties (some might be undefined on the base circuit object)
+            id: circuit.id,
+            name: circuit.name,
+            description: circuit.description,
+            creatorId: circuit.creatorId,
+            // Add enriched/calculated properties
+            creatorName: creator?.name,
+            creatorProfileImage: creator?.profileImage,
+            subscriberCount,
+            isSubscribed,
+            // Ensure isPublic is included, defaulting to true if not present
+            isPublic: circuit.isPublic === undefined ? true : circuit.isPublic,
+            createdAt: circuit.createdAt, 
+            updatedAt: circuit.updatedAt,
+          };
+        })
+      );
+
       res.status(200).json(formattedCircuits);
     } catch (error) {
       handleError(error, res);
@@ -1287,11 +1448,96 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Create a new circuit
   app.post('/api/circuits', authMiddleware, async (req, res) => {
     try {
-      const { name, description } = req.body;
+      const { name, description, isPublic, categoryId } = req.body;
       const creatorId = req.body.currentUserId;
-      if (!name) return res.status(400).json({ message: 'Name is required' });
-      const circuit = await storage.createCircuit({ name, description, creatorId });
+
+      if (!creatorId) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
+      if (!name) {
+        return res.status(400).json({ message: 'Circuit name is required' });
+      }
+      if (typeof isPublic !== 'boolean') {
+        return res.status(400).json({ message: 'isPublic must be a boolean value' });
+      }
+
+      // Validate categoryId if provided
+      if (categoryId) {
+        const category = await storage.getCategory(categoryId);
+        if (!category || !category.isActive) {
+          return res.status(400).json({ message: 'Invalid category selected' });
+        }
+      }
+
+      const circuitData: { name: string; description?: string; creatorId: number; isPublic: boolean; categoryId?: number } = {
+        name,
+        description,
+        creatorId,
+        isPublic,
+        categoryId: categoryId || null,
+      };
+      
+      const circuit = await storage.createCircuit(circuitData);
       res.status(201).json(circuit);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Update an existing circuit (only creator)
+  app.put('/api/circuits/:id', authMiddleware, async (req, res) => {
+    try {
+      const circuitId = parseInt(req.params.id);
+      const currentUserId = req.body.currentUserId;
+      const { name, description, isPublic, categoryId } = req.body;
+
+      if (!currentUserId) {
+        return res.status(401).json({ message: 'User not authenticated' });
+      }
+
+      const existingCircuit = await storage.getCircuit(circuitId);
+      if (!existingCircuit) {
+        return res.status(404).json({ message: 'Circuit not found' });
+      }
+
+      if (existingCircuit.creatorId !== currentUserId) {
+        return res.status(403).json({ message: 'Only the creator can update this circuit' });
+      }
+
+      // Prepare data for update, only include fields that are provided in the request
+      const updateData: Partial<Pick<Circuit, 'name' | 'description' | 'categoryId' | 'isPublic'>> = {};
+      if (name !== undefined) {
+        if (typeof name !== 'string' || name.trim() === '') {
+            return res.status(400).json({ message: 'Circuit name cannot be empty' });
+        }
+        updateData.name = name.trim();
+      }
+      if (description !== undefined) {
+        updateData.description = description; // Allow empty string for description
+      }
+      if (categoryId !== undefined) {
+        // Validate categoryId if provided
+        if (categoryId !== null) {
+          const category = await storage.getCategory(categoryId);
+          if (!category || !category.isActive) {
+            return res.status(400).json({ message: 'Invalid category selected' });
+          }
+        }
+        updateData.categoryId = categoryId;
+      }
+      if (isPublic !== undefined) {
+        if (typeof isPublic !== 'boolean') {
+            return res.status(400).json({ message: 'isPublic must be a boolean value' });
+        }
+        updateData.isPublic = isPublic;
+      }
+      
+      if (Object.keys(updateData).length === 0) {
+        return res.status(400).json({ message: 'No update data provided' });
+      }
+
+      const updatedCircuit = await storage.updateCircuit(circuitId, updateData);
+      res.status(200).json(updatedCircuit);
     } catch (error) {
       handleError(error, res);
     }
@@ -1321,13 +1567,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const limit = parseInt(req.query.limit as string || '10');
       const circuit = await storage.getCircuit(circuitId);
       if (!circuit) return res.status(404).json({ message: 'Circuit not found' });
+
+      // Fetch creator details
+      let creatorName = 'Unknown User';
+      let creatorProfileImage = '/default-profile.png'; // Default image
+      if (circuit.creatorId) {
+        const creator = await storage.getUser(circuit.creatorId);
+        if (creator) {
+          creatorName = creator.name || creator.username; // Use username as fallback
+          creatorProfileImage = creator.profileImage;
+        }
+      }
+
       // Get posts in this circuit (from circuit_posts)
       const postLinks = await db.select().from(circuit_posts)
         .where(eq(circuit_posts.circuitId, circuitId))
         .orderBy(sql`${circuit_posts.addedAt} DESC`)
         .limit(limit)
         .offset((page - 1) * limit);
-      const postIds = postLinks.map(link => Number(link.postId));
+      const postIds = postLinks.map((link: typeof circuit_posts.$inferSelect) => Number(link.postId));
       let circuitPostsRaw: any[] = [];
       if (postIds.length > 0) {
         circuitPostsRaw = await db.select().from(posts).where(inArray(posts.id, postIds));
@@ -1336,10 +1594,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let isSubscribed = false;
       let currentUserId = undefined;
       const authHeader = req.headers.authorization;
-      const sessionId = authHeader?.split(" ")[1];
-      if (sessionId && req.session && req.session.userId !== undefined) {
+      console.log(`[GET /api/circuits/:id] Headers: ${JSON.stringify(req.headers)}`);
+      console.log(`[GET /api/circuits/:id] Session before check: ${JSON.stringify(req.session)}`);
+
+      if (req.session && req.session.userId !== undefined) {
         currentUserId = req.session.userId;
+        console.log(`[GET /api/circuits/:id] User ID from session: ${currentUserId}`);
         isSubscribed = await storage.isSubscribedToCircuit(currentUserId, circuitId);
+        console.log(`[GET /api/circuits/:id] isSubscribed status: ${isSubscribed} for user ${currentUserId}`);
+      } else {
+        console.log(`[GET /api/circuits/:id] No valid session user ID found. isSubscribed remains false.`);
       }
       // Enrich posts with author info and interaction state
       const formattedPosts: any[] = await Promise.all(
@@ -1349,7 +1613,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const totalPostsResult = await db.select({ count: sql`count(*)` }).from(circuit_posts).where(eq(circuit_posts.circuitId, circuitId));
       const totalPosts = Number(totalPostsResult[0]?.count || 0);
       const totalPages = Math.max(1, Math.ceil(totalPosts / limit));
-      res.status(200).json({ circuit, posts: formattedPosts, isSubscribed, totalPages, page });
+      
+      // Fetch subscriber count
+      const subscriberCount = await storage.getCircuitSubscriberCount(circuitId);
+
+      // Add creator info and subscriber count to the response
+      const circuitWithDetails = {
+        ...circuit,
+        creatorName,
+        creatorProfileImage,
+        subscriberCount
+      };
+
+      res.status(200).json({ circuit: circuitWithDetails, posts: formattedPosts, isSubscribed, totalPages, page });
     } catch (error) {
       handleError(error, res);
     }

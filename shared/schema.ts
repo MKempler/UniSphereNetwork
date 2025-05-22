@@ -60,12 +60,26 @@ export const comments = pgTable("comments", {
   createdAt: timestamp("created_at").notNull().defaultNow()
 });
 
+// Categories table
+export const categories = pgTable('categories', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 100 }).notNull().unique(),
+  slug: varchar('slug', { length: 100 }).notNull().unique(), // URL-friendly version
+  description: text('description'),
+  icon: varchar('icon', { length: 50 }).default('HelpCircle'), // Lucide icon name
+  color: varchar('color', { length: 20 }).default('#3B82F6'), // Hex color
+  sortOrder: integer('sort_order').default(0),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // Circuits (curated feeds)
 export const circuits = pgTable('circuits', {
   id: serial('id').primaryKey(),
   name: varchar('name', { length: 255 }).notNull(),
   description: text('description'),
   creatorId: integer('creator_id').notNull().references(() => users.id),
+  categoryId: integer('category_id').references(() => categories.id), // New category reference
   isPublic: boolean('is_public').default(true).notNull(),
   curationType: varchar('curation_type', { length: 50 }).default('manual').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
@@ -185,10 +199,22 @@ export const insertCommentSchema = createInsertSchema(comments).pick({
   userId: true
 });
 
+export const insertCategorySchema = createInsertSchema(categories).pick({
+  name: true,
+  slug: true,
+  description: true,
+  icon: true,
+  color: true,
+  sortOrder: true,
+  isActive: true
+});
+
 export const insertCircuitSchema = createInsertSchema(circuits).pick({
   name: true,
   description: true,
-  creatorId: true
+  creatorId: true,
+  categoryId: true,
+  isPublic: true
 });
 
 export const insertCircuitSubscriptionSchema = createInsertSchema(circuit_subscriptions).pick({
@@ -229,6 +255,7 @@ export type InsertPostInteraction = z.infer<typeof insertPostInteractionSchema>;
 export type InsertComment = z.infer<typeof insertCommentSchema>;
 export type InsertCircuit = z.infer<typeof insertCircuitSchema>;
 export type InsertCircuitSubscription = z.infer<typeof insertCircuitSubscriptionSchema>;
+export type InsertCategory = z.infer<typeof insertCategorySchema>;
 export type InsertCommunity = z.infer<typeof insertCommunitySchema>;
 export type InsertCommunityMember = z.infer<typeof insertCommunityMemberSchema>;
 export type InsertTrend = z.infer<typeof insertTrendSchema>;
@@ -242,6 +269,7 @@ export type PostInteraction = typeof postInteractions.$inferSelect;
 export type Comment = typeof comments.$inferSelect;
 export type Circuit = typeof circuits.$inferSelect;
 export type CircuitSubscription = typeof circuit_subscriptions.$inferSelect;
+export type Category = typeof categories.$inferSelect;
 export type Community = typeof communities.$inferSelect;
 export type CommunityMember = typeof communityMembers.$inferSelect;
 export type Trend = typeof trends.$inferSelect;

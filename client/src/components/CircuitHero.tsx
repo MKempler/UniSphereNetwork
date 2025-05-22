@@ -24,6 +24,7 @@ export const CircuitHero: React.FC<CircuitHeroProps> = ({
   subscribed, 
   onToggle 
 }) => {
+  console.log('[CircuitHero] Rendering with subscribed:', subscribed, 'Name:', name);
   const color1 = stringToHslColor(name, 60, 70);
   const color2 = stringToHslColor(name + 'x', 60, 68);
   const emoji = emojiFromName(name);

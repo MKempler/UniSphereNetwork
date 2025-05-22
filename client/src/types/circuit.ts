@@ -9,9 +9,12 @@ export interface CircuitListItem {
   name: string;
   description: string | null;
   creatorId: number;
-  creatorName?: string; 
+  creatorName?: string;
+  creatorProfileImage?: string;
   subscriberCount: number;
   isSubscribed: boolean;
+  isPublic: boolean;
+  createdAt: string;
   curationType?: string;
 }
 

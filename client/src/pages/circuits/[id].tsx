@@ -8,7 +8,7 @@ import { toast } from '@/hooks/use-toast';
 import type { CircuitDetail, CircuitPost } from '@/types/circuit';
 import { apiRequest } from '@/lib/queryClient';
 import { useUser } from '@/lib/UserContext';
-import { MessageSquare, ChevronLeft, ChevronRight, ArrowLeft } from 'lucide-react';
+import { MessageSquare, ChevronLeft, ChevronRight, ArrowLeft, Settings } from 'lucide-react';
 import MainShell from '@/components/MainShell';
 import SideNav from '@/components/layout/LeftSidebar';
 import RightRail from '@/components/layout/RightSidebar';
@@ -16,12 +16,32 @@ import CircuitHero from '@/components/CircuitHero';
 import CircuitOverviewCard from '@/components/CircuitOverviewCard';
 
 const fetchCircuitDetail = async (id: string): Promise<CircuitDetail> => {
-  const circuitDetailData = await apiRequest('GET', `/api/circuits/${id}`);
-  if (typeof circuitDetailData !== 'object' || circuitDetailData === null) {
-    console.error(`Expected object from /api/circuits/${id}, got:`, circuitDetailData);
+  const responseData = await apiRequest('GET', `/api/circuits/${id}`);
+  
+  if (typeof responseData !== 'object' || responseData === null || !responseData.circuit) {
+    console.error(`Expected object with a 'circuit' property from /api/circuits/${id}, got:`, responseData);
     throw new Error('Invalid data format received for circuit details.');
   }
-  return circuitDetailData as CircuitDetail;
+
+  // Destructure and map to the CircuitDetail type structure
+  const { circuit, posts, isSubscribed, totalPages, page } = responseData;
+
+  return {
+    id: circuit.id,
+    name: circuit.name,
+    description: circuit.description,
+    creatorId: circuit.creatorId,
+    creatorName: circuit.creatorName, // This was added to the API response
+    creatorProfileImage: circuit.creatorProfileImage, // This was added to the API response
+    isPublic: circuit.isPublic,
+    createdAt: circuit.createdAt,
+    curationType: circuit.curationType, // Assuming it might exist on circuit object
+    posts: posts,
+    isSubscribed: isSubscribed,
+    totalPages: totalPages,
+    currentPage: page,
+    subscriberCount: circuit.subscriberCount || 0, // Defaulting as it's not in current API response for this endpoint
+  };
 };
 
 const PostCard: React.FC<{ post: CircuitPost, isCreator: boolean, onRemovePost?: (postId: number) => void }> = ({ post, isCreator, onRemovePost }) => {
@@ -43,7 +63,7 @@ const PostCard: React.FC<{ post: CircuitPost, isCreator: boolean, onRemovePost?:
     <Card className="mb-6 overflow-hidden hover:shadow-md transition-shadow">
       <CardHeader className="flex flex-row items-center space-x-3 pb-3">
         <Avatar className="h-10 w-10 border-2 border-primary-100">
-          <AvatarImage src={post.author.profileImage || undefined} alt={post.author.username} />
+            <AvatarImage src={post.author.profileImage || undefined} alt={post.author.username} />
           <AvatarFallback className="bg-primary-50 text-primary-700">
             {post.author.username.substring(0, 2).toUpperCase()}
           </AvatarFallback>
@@ -56,8 +76,8 @@ const PostCard: React.FC<{ post: CircuitPost, isCreator: boolean, onRemovePost?:
             @{post.author.username} · {post.createdAt}
           </CardDescription>
         </div>
-      </CardHeader>
-      <CardContent>
+    </CardHeader>
+    <CardContent>
         <p className="whitespace-pre-wrap mb-3 text-neutral-800">{post.content}</p>
         
         {mediaArray.length > 0 && (
@@ -93,8 +113,8 @@ const PostCard: React.FC<{ post: CircuitPost, isCreator: boolean, onRemovePost?:
             )}
           </div>
         )}
-      </CardContent>
-      {isCreator && onRemovePost && (
+    </CardContent>
+    {isCreator && onRemovePost && (
         <CardFooter className="border-t pt-3 flex justify-end">
           <Button 
             variant="destructive" 
@@ -105,9 +125,9 @@ const PostCard: React.FC<{ post: CircuitPost, isCreator: boolean, onRemovePost?:
             Remove from Circuit
           </Button>
         </CardFooter>
-      )}
-    </Card>
-  );
+    )}
+  </Card>
+);
 };
 
 const getAccentColorFromName = (name: string = 'Circuit'): string => {
@@ -122,7 +142,7 @@ const CircuitDetailPage: React.FC = () => {
   const circuitId = params?.id;
   const [, navigate] = useLocation();
 
-  const { data: circuit, isLoading, error } = useQuery<CircuitDetail, Error, CircuitDetail, QueryKey>({
+  const { data: circuit, isLoading, error, refetch: refetchCircuitDetails } = useQuery<CircuitDetail, Error, CircuitDetail, QueryKey>({
     queryKey: ['circuitDetail', circuitId],
     queryFn: () => fetchCircuitDetail(circuitId!),
     enabled: !!circuitId,
@@ -151,7 +171,7 @@ const CircuitDetailPage: React.FC = () => {
       toast({ title: 'Unsubscription failed', description: err.message, variant: 'destructive' });
     },
   });
-
+  
   if (!circuitId) return <div className="text-center p-10">Circuit ID not found.</div>;
   if (isLoading) return <div className="text-center p-10">Loading circuit details...</div>;
   if (error) return <div className="text-center p-10 text-red-500">Error loading circuit: {error.message}</div>;
@@ -160,6 +180,8 @@ const CircuitDetailPage: React.FC = () => {
   const isCreator = user?.id === circuit.creatorId;
   const accentColor = getAccentColorFromName(circuit.name);
   
+  console.log('[CircuitDetailPage] circuit.isSubscribed before passing to CircuitHero:', circuit.isSubscribed, 'Circuit ID:', circuitId);
+
   const handleToggleSubscription = () => {
     if (circuit.isSubscribed) {
       unsubscribeMutation.mutate(circuitId);
@@ -186,10 +208,26 @@ const CircuitDetailPage: React.FC = () => {
               <ArrowLeft className="h-3 w-3 mr-1" /> Back to Social Circuits
             </Link>
             
-            <h1 className="text-3xl font-bold">{circuit.name}</h1>
-            <p className="text-neutral-500 mt-1">
-              {circuit.description || `A circuit for all things ${(circuit.name || 'this circuit').toLowerCase()}`}
-            </p>
+          <div className="flex justify-between items-start">
+            <div>
+                <h1 className="text-3xl font-bold">{circuit.name}</h1>
+                <p className="text-neutral-500 mt-1">
+                  {circuit.description || `A circuit for all things ${(circuit.name || 'this circuit').toLowerCase()}`}
+                </p>
+            </div>
+              {isCreator && (
+                <Button 
+                  variant="outline"
+                  size="sm"
+                  onClick={() => navigate(`/circuits/${circuitId}/edit`)}
+                  className="ml-4 flex-shrink-0"
+                  aria-label="Edit Circuit"
+                >
+                  <Settings className="mr-2 h-4 w-4" />
+                  Edit Circuit
+                </Button>
+            )}
+          </div>
           </div>
         </div>
         
@@ -198,33 +236,34 @@ const CircuitDetailPage: React.FC = () => {
             <CircuitOverviewCard 
               creatorName={circuit.creatorName} 
               creatorId={circuit.creatorId}
-              creatorImage={undefined}
+              creatorImage={circuit.creatorProfileImage || undefined}
               subscriberCount={circuit.subscriberCount || 0}
-              createdAt={defaultDate}
+              createdAt={circuit.createdAt || defaultDate}
               accentColor={accentColor}
+              isPublic={circuit.isPublic}
             />
             
             <section>
               <h2 className="text-2xl font-semibold mb-4">Recent Posts</h2>
               
-              {circuit.posts && circuit.posts.length > 0 ? (
+      {circuit.posts && circuit.posts.length > 0 ? (
                 <div className="space-y-4">
-                  {circuit.posts.map(post => (
+          {circuit.posts.map(post => (
                     <PostCard 
                       key={post.id} 
                       post={post} 
                       isCreator={isCreator}
-                      onRemovePost={(postId) => alert(`Remove post ${postId} - TBD`)} 
+                      onRemovePost={(postId) => alert(`Remove post ${postId} - TBD: Call API to remove from circuit`)} 
                     />
-                  ))}
-                </div>
-              ) : (
+          ))}
+        </div>
+      ) : (
                 <Card className="text-center p-10 border">
-                  <MessageSquare className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+          <MessageSquare className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
                   <h3 className="text-xl font-semibold">No one's posted yet — be the first to spark the conversation!</h3>
                   <p className="text-muted-foreground mt-2 mb-6">Start a discussion or share something interesting with the circuit.</p>
-                  <Button className="bg-primary-500 hover:bg-primary-600">
-                    Post now
+                  <Button className="bg-primary-500 hover:bg-primary-600" onClick={() => alert("TBD: Create post in circuit")}>
+                    Post to Circuit
                   </Button>
                 </Card>
               )}

@@ -6,6 +6,7 @@ import type {
   Comment, InsertComment,
   Circuit, InsertCircuit,
   CircuitSubscription, InsertCircuitSubscription,
+  Category, InsertCategory,
   Community, InsertCommunity,
   CommunityMember, InsertCommunityMember,
   Trend, InsertTrend,
@@ -13,8 +14,8 @@ import type {
 } from "../shared/schema.ts";
 import {
   users, posts, follows, postInteractions, comments,
-  circuits, circuit_subscriptions, communities,
-  communityMembers, trends, notifications
+  circuits, circuit_subscriptions, categories,
+  communities, communityMembers, trends, notifications
 } from "../shared/schema.ts";
 import { db } from "./db.ts";
 import { eq, and, sql, inArray } from "drizzle-orm";
@@ -53,10 +54,21 @@ export interface IStorage {
   hasInteraction(postId: number, userId: number, type: string): Promise<boolean>;
   getPostInteractionCount(postId: number, type: string): Promise<number>;
 
+  // Category operations
+  getCategories(): Promise<Category[]>;
+  getCategory(id: number): Promise<Category | undefined>;
+  getCategoryBySlug(slug: string): Promise<Category | undefined>;
+  createCategory(category: InsertCategory): Promise<Category>;
+  updateCategory(id: number, data: Partial<Pick<Category, 'name' | 'description' | 'icon' | 'color' | 'sortOrder' | 'isActive'>>): Promise<Category | undefined>;
+
   // Circuit operations
   getCircuit(id: number): Promise<Circuit | undefined>;
   getPopularCircuits(): Promise<Circuit[]>;
+  getCircuitsByCategory(categoryId: number): Promise<Circuit[]>;
+  getTrendingCircuits(limit?: number): Promise<Circuit[]>;
+  getSuggestedCircuits(userId?: number, limit?: number): Promise<Circuit[]>;
   createCircuit(circuit: InsertCircuit): Promise<Circuit>;
+  updateCircuit(id: number, data: Partial<Pick<Circuit, 'name' | 'description' | 'categoryId' | 'isPublic'>>): Promise<Circuit | undefined>;
   subscribeToCircuit(userId: number, circuitId: number): Promise<CircuitSubscription>;
   unsubscribeFromCircuit(userId: number, circuitId: number): Promise<void>;
   isSubscribedToCircuit(userId: number, circuitId: number): Promise<boolean>;
@@ -103,6 +115,10 @@ export class DatabaseStorage implements IStorage {
   // User methods implementation with database
   async getUser(id: number): Promise<User | undefined> {
     try {
+      if (id === undefined || id === null || isNaN(id)) {
+        console.warn("getUser called with invalid id:", id);
+        return undefined;
+      }
       const [user] = await db.select().from(users).where(eq(users.id, id));
       return user;
     } catch (error) {
@@ -610,13 +626,16 @@ export class DatabaseStorage implements IStorage {
   
   async createCircuit(insertCircuit: InsertCircuit): Promise<Circuit> {
     try {
-      const [circuit] = await db
-        .insert(circuits)
-        .values({
-          ...insertCircuit,
-          createdAt: new Date()
-        })
-        .returning();
+      console.log("[storage.createCircuit] Received data:", JSON.stringify(insertCircuit, null, 2));
+      const [circuit] = await db.insert(circuits).values({
+        ...insertCircuit,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }).returning();
+      if (!circuit) {
+        throw new Error("Circuit creation failed, no record returned.");
+      }
+      console.log("[storage.createCircuit] Created circuit:", JSON.stringify(circuit, null, 2));
       return circuit;
     } catch (error) {
       console.error("Error in createCircuit:", error);
@@ -624,9 +643,46 @@ export class DatabaseStorage implements IStorage {
     }
   }
   
+  async updateCircuit(id: number, data: Partial<Pick<Circuit, 'name' | 'description' | 'isPublic'>>): Promise<Circuit | undefined> {
+    try {
+      console.log(`[storage.updateCircuit] Updating circuit ${id} with data:`, JSON.stringify(data, null, 2));
+      const [updatedCircuit] = await db.update(circuits)
+        .set({...data, updatedAt: new Date()})
+        .where(eq(circuits.id, id))
+        .returning();
+      
+      if (!updatedCircuit) {
+        console.warn(`[storage.updateCircuit] Circuit with id ${id} not found or update failed.`);
+        return undefined;
+      }
+      console.log("[storage.updateCircuit] Updated circuit:", JSON.stringify(updatedCircuit, null, 2));
+      return updatedCircuit;
+    } catch (error) {
+      console.error(`Error in updateCircuit for id ${id}:`, error);
+      throw error;
+    }
+  }
+  
   async subscribeToCircuit(userId: number, circuitId: number): Promise<CircuitSubscription> {
     try {
-      const [subscription] = await db
+      // Check if already subscribed
+      const [existingSubscription] = await db
+        .select()
+        .from(circuit_subscriptions)
+        .where(
+          and(
+            eq(circuit_subscriptions.userId, userId),
+            eq(circuit_subscriptions.circuitId, circuitId)
+          )
+        );
+
+      if (existingSubscription) {
+        console.log(`User ${userId} already subscribed to circuit ${circuitId}. Returning existing.`);
+        return existingSubscription; // Or handle as an "already subscribed" case if preferred
+      }
+
+      // If not subscribed, create new subscription
+      const [newSubscription] = await db
         .insert(circuit_subscriptions)
         .values({
           userId,
@@ -634,9 +690,13 @@ export class DatabaseStorage implements IStorage {
           subscribedAt: new Date()
         })
         .returning();
-      return subscription;
+      console.log(`User ${userId} newly subscribed to circuit ${circuitId}.`);
+      return newSubscription;
+
     } catch (error) {
       console.error("Error in subscribeToCircuit:", error);
+      // Consider if this error could be due to a race condition if two requests try to insert simultaneously
+      // after the check. A unique constraint in the DB is the ultimate guard.
       throw error;
     }
   }
@@ -685,6 +745,141 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("Error in getCircuitSubscriberCount:", error);
       return 0;
+    }
+  }
+
+  // Category operations
+  async getCategories(): Promise<Category[]> {
+    try {
+      return await db
+        .select()
+        .from(categories)
+        .where(eq(categories.isActive, true))
+        .orderBy(categories.sortOrder);
+    } catch (error) {
+      console.error("Error in getCategories:", error);
+      return [];
+    }
+  }
+
+  async getCategory(id: number): Promise<Category | undefined> {
+    try {
+      const [category] = await db.select().from(categories).where(eq(categories.id, id));
+      return category;
+    } catch (error) {
+      console.error("Error in getCategory:", error);
+      return undefined;
+    }
+  }
+
+  async getCategoryBySlug(slug: string): Promise<Category | undefined> {
+    try {
+      const [category] = await db.select().from(categories).where(eq(categories.slug, slug));
+      return category;
+    } catch (error) {
+      console.error("Error in getCategoryBySlug:", error);
+      return undefined;
+    }
+  }
+
+  async createCategory(insertCategory: InsertCategory): Promise<Category> {
+    try {
+      const [category] = await db.insert(categories).values({
+        ...insertCategory,
+        createdAt: new Date(),
+      }).returning();
+      return category;
+    } catch (error) {
+      console.error("Error in createCategory:", error);
+      throw error;
+    }
+  }
+
+  async updateCategory(id: number, data: Partial<Pick<Category, 'name' | 'description' | 'icon' | 'color' | 'sortOrder' | 'isActive'>>): Promise<Category | undefined> {
+    try {
+      const [category] = await db
+        .update(categories)
+        .set(data)
+        .where(eq(categories.id, id))
+        .returning();
+      return category;
+    } catch (error) {
+      console.error("Error in updateCategory:", error);
+      return undefined;
+    }
+  }
+
+  async getCircuitsByCategory(categoryId: number): Promise<Circuit[]> {
+    try {
+      return await db
+        .select()
+        .from(circuits)
+        .where(eq(circuits.categoryId, categoryId))
+        .orderBy(sql`${circuits.createdAt} DESC`);
+    } catch (error) {
+      console.error("Error in getCircuitsByCategory:", error);
+      return [];
+    }
+  }
+
+  async getTrendingCircuits(limit = 10): Promise<Circuit[]> {
+    try {
+      // Get circuits with most subscribers (trending by popularity)
+      const query = `
+        SELECT c.*, COUNT(cs.user_id) as subscriber_count
+        FROM circuits c
+        LEFT JOIN circuit_subscriptions cs ON c.id = cs.circuit_id
+        WHERE c.is_public = true
+        GROUP BY c.id
+        ORDER BY subscriber_count DESC, c.created_at DESC
+        LIMIT ${limit}
+      `;
+      // @ts-ignore
+      return await db.execute(query);
+    } catch (error) {
+      console.error("Error in getTrendingCircuits:", error);
+      return [];
+    }
+  }
+
+  async getSuggestedCircuits(userId?: number, limit = 10): Promise<Circuit[]> {
+    try {
+      if (!userId) {
+        // For anonymous users, return popular public circuits
+        return await db
+          .select()
+          .from(circuits)
+          .where(eq(circuits.isPublic, true))
+          .orderBy(sql`${circuits.createdAt} DESC`)
+          .limit(limit);
+      }
+
+      // For logged-in users, suggest circuits from categories they're interested in
+      // or circuits created by people they follow
+      const query = `
+        SELECT DISTINCT c.*, 
+               CASE WHEN f.follower_id = ${userId} THEN 2 ELSE 1 END as priority
+        FROM circuits c
+        LEFT JOIN circuit_subscriptions cs ON c.id = cs.circuit_id
+        LEFT JOIN follows f ON c.creator_id = f.following_id
+        WHERE c.is_public = true
+          AND c.id NOT IN (
+            SELECT circuit_id FROM circuit_subscriptions WHERE user_id = ${userId}
+          )
+          AND (f.follower_id = ${userId} OR c.category_id IN (
+            SELECT DISTINCT c2.category_id 
+            FROM circuits c2 
+            JOIN circuit_subscriptions cs2 ON c2.id = cs2.circuit_id 
+            WHERE cs2.user_id = ${userId}
+          ))
+        ORDER BY priority DESC, c.created_at DESC
+        LIMIT ${limit}
+      `;
+      // @ts-ignore
+      return await db.execute(query);
+    } catch (error) {
+      console.error("Error in getSuggestedCircuits:", error);
+      return [];
     }
   }
   

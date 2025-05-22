@@ -20,8 +20,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     setError(null);
     try {
-      const res = await apiRequest("GET", "/api/users/me");
-      const data = await res.json();
+      const data = await apiRequest("GET", "/api/users/me");
       setUser(data);
     } catch (err: any) {
       setUser(null);

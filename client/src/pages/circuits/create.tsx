@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
 import { useLocation } from 'wouter';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from '@/hooks/use-toast';
 import { apiRequest } from '@/lib/queryClient';
 import type { CircuitListItem } from '@/types/circuit';
@@ -16,27 +17,16 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
 import stringToHslColor from '@/utils/stringToHslColor';
 
-// Circuit types based on the schema
-const CIRCUIT_TYPES = [
-  { id: 'news', name: 'News', description: 'For sharing news, articles and current events' },
-  { id: 'photography', name: 'Photography', description: 'For sharing and discussing photography' },
-  { id: 'tech', name: 'Technology', description: 'For technology discussions and updates' },
-  { id: 'other', name: 'Other', description: 'For any other topic' }
-];
-
 interface CreateCircuitPayload {
   name: string;
   description?: string;
-  type: 'news' | 'photography' | 'tech' | 'other';
+  isPublic: boolean;
+  categoryId?: number;
 }
 
 const createCircuit = async (payload: CreateCircuitPayload): Promise<CircuitListItem> => {
-  const response = await apiRequest('POST', '/api/circuits', payload);
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ message: 'Failed to create circuit' }));
-    throw new Error(errorData.message || 'Failed to create circuit');
-  }
-  return response.json();
+  const responseData = await apiRequest('POST', '/api/circuits', payload);
+  return responseData;
 };
 
 const CreateCircuitPage: React.FC = () => {
@@ -47,12 +37,22 @@ const CreateCircuitPage: React.FC = () => {
   const [step, setStep] = useState<number>(1);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [circuitType, setCircuitType] = useState<'news' | 'photography' | 'tech' | 'other'>('other');
-  
+  const [isPublic, setIsPublic] = useState(true);
+  const [categoryId, setCategoryId] = useState<number | undefined>(undefined);
+
+  // Fetch categories for dropdown
+  const { data: categories = [], isLoading: categoriesLoading } = useQuery({
+    queryKey: ['categories'],
+    queryFn: () => apiRequest('GET', '/api/categories'),
+  });
+
   const mutation = useMutation<CircuitListItem, Error, CreateCircuitPayload>({
     mutationFn: createCircuit,
     onSuccess: (data) => {
+      // Invalidate multiple circuit-related queries
       queryClient.invalidateQueries({ queryKey: ['popularCircuits'] });
+      queryClient.invalidateQueries({ queryKey: ['circuits'] }); // This covers all circuit queries including category-specific ones
+      queryClient.invalidateQueries({ queryKey: ['categories'] }); // In case category stats change
       toast({ title: 'Circuit created successfully!', description: `Circuit "${data.name}" has been created.` });
       navigate('/circuits');
     },
@@ -62,7 +62,7 @@ const CreateCircuitPage: React.FC = () => {
   });
 
   const moveToNextStep = () => {
-    if (step < 3) {
+    if (step < 2) {
       setStep(step + 1);
     }
   };
@@ -79,7 +79,7 @@ const CreateCircuitPage: React.FC = () => {
       toast({ title: 'Validation Error', description: 'Circuit name is required.', variant: 'destructive' });
       return;
     }
-    mutation.mutate({ name, description, type: circuitType });
+    mutation.mutate({ name, description, isPublic, categoryId });
   };
 
   const isNextDisabled = () => {
@@ -92,60 +92,76 @@ const CreateCircuitPage: React.FC = () => {
   const renderStepContent = () => {
     switch (step) {
       case 1:
-        return (
+  return (
           <div className="flex flex-col gap-4">
+        <div>
+                <Label htmlFor="name" className="font-semibold">Circuit Name</Label>
+                <Input
+                  id="name"
+            value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Awesome Tech News, Daily Photography"
+                  className="mt-1"
+            required
+          />
+        </div>
+        <div>
+                <Label htmlFor="description" className="font-semibold">Description <span className="font-normal text-neutral-500">(Optional)</span></Label>
+                <Textarea
+                  id="description"
+            value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+            placeholder="What is this circuit about?"
+                  rows={3}
+                  className="mt-1"
+          />
+        </div>
+        <div>
+          <Label className="font-semibold mb-2 block">Category <span className="font-normal text-neutral-500">(Optional)</span></Label>
+          <Select 
+            value={categoryId?.toString() || ""} 
+            onValueChange={(value) => setCategoryId(value ? parseInt(value) : undefined)}
+            disabled={categoriesLoading}
+          >
+            <SelectTrigger className="mt-1">
+              <SelectValue placeholder={categoriesLoading ? "Loading categories..." : "Select a category"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">No category</SelectItem>
+              {categories.map((category: any) => (
+                <SelectItem key={category.id} value={category.id.toString()}>
+                  {category.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground mt-1">
+            Help others discover your circuit by choosing a relevant category.
+          </p>
+        </div>
             <div>
-              <Label htmlFor="name" className="font-semibold">Circuit Name</Label>
-              <Input
-                id="name"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Awesome Tech News, Daily Photography"
-                className="mt-1"
-                required
-              />
-            </div>
-            <div>
-              <Label htmlFor="description" className="font-semibold">Description <span className="font-normal text-neutral-500">(Optional)</span></Label>
-              <Textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What is this circuit about?"
-                rows={3}
-                className="mt-1"
-              />
+              <Label className="font-semibold mb-2 block">Visibility</Label>
+              <RadioGroup 
+                value={isPublic ? "public" : "private"}
+                onValueChange={(value) => setIsPublic(value === "public")}
+                className="flex space-x-4 mt-1"
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="public" id="public" />
+                  <Label htmlFor="public" className="font-normal">Public</Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="private" id="private" />
+                  <Label htmlFor="private" className="font-normal">Private</Label>
+                </div>
+              </RadioGroup>
+              <p className="text-xs text-muted-foreground mt-1">
+                Public circuits are visible to everyone. Private circuits may have restricted visibility (full functionality TBD).
+              </p>
             </div>
           </div>
         );
       case 2:
-        return (
-          <div className="flex flex-col gap-4">
-            <div>
-              <Label className="font-semibold mb-2 block">Circuit Type</Label>
-              <RadioGroup 
-                value={circuitType} 
-                onValueChange={(val) => setCircuitType(val as 'news' | 'photography' | 'tech' | 'other')}
-                className="flex flex-col gap-3"
-              >
-                {CIRCUIT_TYPES.map((type) => (
-                  <div 
-                    key={type.id} 
-                    className="flex items-start space-x-3 rounded-lg border border-neutral-200 p-3 hover:bg-neutral-50 cursor-pointer"
-                    onClick={() => setCircuitType(type.id as 'news' | 'photography' | 'tech' | 'other')}
-                  >
-                    <RadioGroupItem value={type.id} id={type.id} className="mt-1" />
-                    <Label htmlFor={type.id} className="cursor-pointer flex-1">
-                      <div className="font-medium">{type.name}</div>
-                      <div className="text-sm text-neutral-500">{type.description}</div>
-                    </Label>
-                  </div>
-                ))}
-              </RadioGroup>
-            </div>
-          </div>
-        );
-      case 3:
         return (
           <div className="flex flex-col gap-4">
             <div className="bg-neutral-50 rounded-lg p-4 border border-neutral-200">
@@ -155,13 +171,22 @@ const CreateCircuitPage: React.FC = () => {
                   <p className="text-sm text-neutral-500">Name</p>
                   <p className="font-medium">{name}</p>
                 </div>
-                <div>
-                  <p className="text-sm text-neutral-500">Type</p>
-                  <p className="font-medium">{CIRCUIT_TYPES.find(t => t.id === circuitType)?.name || circuitType}</p>
-                </div>
                 <div className="col-span-2">
                   <p className="text-sm text-neutral-500">Description</p>
                   <p className="font-medium">{description || 'No description provided.'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-neutral-500">Category</p>
+                  <p className="font-medium">
+                    {categoryId 
+                      ? categories.find((cat: any) => cat.id === categoryId)?.name || 'Unknown Category'
+                      : 'No category selected'
+                    }
+                  </p>
+                </div>
+                <div>
+                  <p className="text-sm text-neutral-500">Visibility</p>
+                  <p className="font-medium">{isPublic ? 'Public' : 'Private'}</p>
                 </div>
               </div>
             </div>
@@ -192,16 +217,9 @@ const CreateCircuitPage: React.FC = () => {
             <div className={`h-0.5 w-8 rounded ${step >= 2 ? 'bg-primary-500' : 'bg-neutral-200'}`} />
             <div className="flex items-center gap-2">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${step >= 2 ? 'bg-primary-500 text-white' : 'bg-neutral-100 text-neutral-400'}`}>
-                {step > 2 ? <Check className="w-4 h-4" /> : '2'}
+                2
               </div>
-              <span className={`font-medium ${step >= 2 ? 'text-primary-700' : 'text-neutral-400'}`}>Customization</span>
-            </div>
-            <div className={`h-0.5 w-8 rounded ${step >= 3 ? 'bg-primary-500' : 'bg-neutral-200'}`} />
-            <div className="flex items-center gap-2">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${step >= 3 ? 'bg-primary-500 text-white' : 'bg-neutral-100 text-neutral-400'}`}>
-                3
-              </div>
-              <span className={`font-medium ${step >= 3 ? 'text-primary-700' : 'text-neutral-400'}`}>Confirmation</span>
+              <span className={`font-medium ${step >= 2 ? 'text-primary-700' : 'text-neutral-400'}`}>Confirmation</span>
             </div>
           </div>
           {/* Card with form and preview */}
@@ -220,7 +238,7 @@ const CreateCircuitPage: React.FC = () => {
                   </Button>
                 ) : <div />}
                 
-                {step < 3 ? (
+                {step < 2 ? (
                   <Button 
                     type="button"
                     className="flex items-center gap-1 ml-auto"
@@ -236,8 +254,8 @@ const CreateCircuitPage: React.FC = () => {
                     disabled={mutation.isPending}
                     onClick={handleSubmit}
                   >
-                    {mutation.isPending ? 'Creating Circuit...' : 'Create Circuit'}
-                  </Button>
+                {mutation.isPending ? 'Creating Circuit...' : 'Create Circuit'}
+              </Button>
                 )}
               </div>
             </form>
@@ -253,22 +271,17 @@ const CreateCircuitPage: React.FC = () => {
                   style={{ backgroundColor: stringToHslColor(name || 'Circuit Name') }}
                 />
                 <div className="p-4 flex flex-col gap-3">
-                  <div className="font-semibold text-lg truncate">{name || 'Circuit Name'}</div>
-                  <div className="text-neutral-500 text-sm min-h-[2em]">{description || 'No description provided.'}</div>
+                <div className="font-semibold text-lg truncate">{name || 'Circuit Name'}</div>
+                <div className="text-neutral-500 text-sm min-h-[2em]">{description || 'No description provided.'}</div>
                   <div className="text-xs text-neutral-400 flex items-center mt-1">
-                    {circuitType && CIRCUIT_TYPES.find(t => t.id === circuitType) ? (
-                      <span className="bg-neutral-100 px-2 py-0.5 rounded-full">
-                        {CIRCUIT_TYPES.find(t => t.id === circuitType)?.name}
-                      </span>
-                    ) : null}
                   </div>
-                  <Button className="mt-2 w-full" variant="default" type="button" tabIndex={-1} disabled>Subscribe</Button>
+                <Button className="mt-2 w-full" variant="default" type="button" tabIndex={-1} disabled>Subscribe</Button>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
+    </div>
     </MainShell>
   );
 };
