@@ -373,6 +373,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Update Current User Profile
+  app.patch("/api/users/me", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const { name, bio, profileImage, coverImage } = req.body;
+      
+      console.log(`Updating user profile for ID: ${userId} with data:`, { name, bio, profileImage, coverImage });
+      
+      const user = await storage.getUser(userId);
+      if (!user) {
+        console.log(`User profile update failed: User ID ${userId} not found`);
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      // Update user with provided fields
+      const updatedUser = await storage.updateUser(userId, {
+        name: name !== undefined ? name : user.name,
+        bio: bio !== undefined ? bio : user.bio,
+        profileImage: profileImage !== undefined ? profileImage : user.profileImage,
+        coverImage: coverImage !== undefined ? coverImage : user.coverImage
+      });
+      
+      console.log(`User profile updated successfully for ${updatedUser.username} (ID: ${updatedUser.id})`);
+      const formattedUser = await formatUser(updatedUser);
+      
+      res.status(200).json(formattedUser);
+    } catch (error) {
+      console.error("Error updating user profile:", error);
+      handleError(error, res);
+    }
+  });
+
   // User Profile Route
   app.get("/api/users/profile/:username", async (req, res) => {
     try {

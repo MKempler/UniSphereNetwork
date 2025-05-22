@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Post, User } from "@/types";
 import ProfilePictureUpload from '@/components/users/ProfilePictureUpload';
+import EditProfileModal from '@/components/users/EditProfileModal';
 
 export default function Profile() {
   const { username } = useParams<{ username?: string }>();
@@ -22,6 +23,7 @@ export default function Profile() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("posts");
+  const [editOpen, setEditOpen] = useState(false);
 
   const { data: currentUser } = useQuery<User | null>({
     queryKey: ["/api/users/me"],
@@ -107,33 +109,42 @@ export default function Profile() {
         {/* Profile Header */}
         <div className="rounded-xl border bg-white dark:bg-dark-bg/40 shadow-sm overflow-hidden relative">
           {/* Cover Image */}
-          <div className="h-36 bg-primary-500/10 w-full relative">
-            {profileUser!.coverImage && (
+          <div className="h-48 bg-gradient-to-r from-primary-500/10 to-secondary-500/10 w-full relative">
+            {profileUser!.coverImage ? (
               <img
                 src={profileUser!.coverImage}
                 alt={`${profileUser!.name}'s cover`}
                 className="w-full h-full object-cover"
               />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-neutral-400">
+                {/* Background pattern or design when no banner */}
+                <div className="absolute inset-0 opacity-10 bg-repeat" 
+                  style={{ backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'20\' height=\'20\' viewBox=\'0 0 20 20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%239C92AC\' fill-opacity=\'1\' fill-rule=\'evenodd\'%3E%3Ccircle cx=\'3\' cy=\'3\' r=\'3\'/%3E%3Ccircle cx=\'13\' cy=\'13\' r=\'3\'/%3E%3C/g%3E%3C/svg%3E")' }}>
+                </div>
+              </div>
             )}
             {/* Profile Image */}
-            <div className="absolute left-6 -bottom-12">
-              {isOwnProfile ? (
-                <ProfilePictureUpload user={profileUser!} />
-              ) : (
-                <Avatar className="w-24 h-24 border-4 border-white dark:border-dark-bg/40 shadow-lg">
-                  <AvatarImage src={profileUser!.profileImage} alt={profileUser!.name} />
-                  <AvatarFallback className="text-2xl">{profileUser!.name.charAt(0)}</AvatarFallback>
-                </Avatar>
-              )}
+            <div className="absolute left-8 -bottom-16">
+              <Avatar className="w-32 h-32 border-4 border-white dark:border-dark-bg/40 shadow-lg">
+                <AvatarImage src={profileUser!.profileImage} alt={profileUser!.name} />
+                <AvatarFallback className="text-3xl">{profileUser!.name.charAt(0)}</AvatarFallback>
+              </Avatar>
             </div>
             {/* Follow/Edit Button */}
-            <div className="absolute right-6 -bottom-10">
+            <div className="absolute right-6 bottom-6">
               {isOwnProfile ? (
-                <Button variant="outline">Edit Profile</Button>
+                <>
+                  <Button variant="outline" onClick={() => setEditOpen(true)} className="bg-white/90 dark:bg-dark-bg/90 backdrop-blur-sm">
+                    Edit Profile
+                  </Button>
+                  <EditProfileModal open={editOpen} onOpenChange={setEditOpen} user={profileUser!} />
+                </>
               ) : (
                 <Button
                   variant={profileUser!.isFollowing ? "outline" : "default"}
                   onClick={() => followMutation.mutate()}
+                  className={profileUser!.isFollowing ? "bg-white/90 dark:bg-dark-bg/90 backdrop-blur-sm" : ""}
                 >
                   {profileUser!.isFollowing ? "Unfollow" : "Follow"}
                 </Button>
@@ -141,7 +152,7 @@ export default function Profile() {
             </div>
           </div>
           {/* Profile Info */}
-          <div className="pt-16 pb-6 px-8">
+          <div className="pt-20 pb-6 px-8">
             <div className="flex items-center gap-2">
               <h1 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">{profileUser!.name}</h1>
               {profileUser!.isVerified && (
