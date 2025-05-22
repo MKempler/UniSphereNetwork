@@ -1234,6 +1234,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Delete a post (only author)
+  app.delete("/api/posts/:id", authMiddleware, async (req, res) => {
+    try {
+      const postId = parseInt(req.params.id);
+      const userId = req.body.currentUserId;
+      const post = await storage.getPost(postId);
+      if (!post) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      if (post.userId !== userId) {
+        return res.status(403).json({ message: "You can only delete your own posts" });
+      }
+      await storage.deletePost(postId);
+      res.status(204).end();
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
   // Create an HTTP server instance
   const httpServer = createServer(app);
 

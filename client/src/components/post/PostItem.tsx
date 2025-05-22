@@ -9,6 +9,12 @@ import { Post } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 import TranslatedText from "@/components/common/TranslatedText";
 import { LuGlobe } from "react-icons/lu";
+import { useAuth } from "@/hooks/simpleAuth.js";
+
+// Add UI components for menu and modal
+import { Menu, MenuButton, MenuList, MenuItem } from "@/components/ui/menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 
 interface PostItemProps {
   post: Post;
@@ -24,6 +30,10 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
   const { t } = useI18nTranslation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user: currentUser } = useAuth();
+
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const likePostMutation = useMutation({
     mutationFn: async () => {
@@ -71,6 +81,26 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
       toast({
         title: "Error",
         description: `Failed to save post: ${error}`,
+        variant: "destructive",
+      });
+    }
+  });
+
+  const deletePostMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("DELETE", `/api/posts/${post.id}`);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Post deleted",
+        description: "Your post has been deleted.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: `Failed to delete post: ${error}`,
         variant: "destructive",
       });
     }
@@ -144,11 +174,20 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
             </div>
           </div>
         </div>
-        <button className="text-neutral-dark p-1 rounded-full hover:bg-neutral-light transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
-          </svg>
-        </button>
+        <Menu open={menuOpen} onOpenChange={setMenuOpen}>
+          <MenuButton className="text-neutral-dark p-1 rounded-full hover:bg-neutral-light transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
+            </svg>
+          </MenuButton>
+          <MenuList>
+            {currentUser && currentUser.id === post.author.id && (
+              <MenuItem onClick={() => { setMenuOpen(false); setConfirmOpen(true); }} className="text-red-600">
+                Delete post
+              </MenuItem>
+            )}
+          </MenuList>
+        </Menu>
       </div>
       
       {/* Post Content */}
@@ -213,6 +252,26 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
           <span className="text-sm">Save</span>
         </button>
       </div>
+
+      {/* Confirmation Dialog */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete post?</DialogTitle>
+          </DialogHeader>
+          <div className="py-2 text-neutral-700">
+            Are you sure? This action is <span className="font-bold text-red-600">permanent</span> and cannot be undone.
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={deletePostMutation.status === 'pending'}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => { deletePostMutation.mutate(); setConfirmOpen(false); }} disabled={deletePostMutation.status === 'pending'}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
