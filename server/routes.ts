@@ -51,13 +51,33 @@ const RELAY_URL = process.env.RELAY_URL || "http://localhost:5000";
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware to check authentication
   const authMiddleware = (req: Request, res: Response, next: () => void) => {
-    if (!req.session || !req.session.userId) {
-      console.log('No session or userId in session');
-      return res.status(401).json({ message: "Unauthorized - No session" });
+    // First check session from cookies
+    if (req.session && req.session.userId) {
+      console.log(`Auth successful via session for user ID: ${req.session.userId}`);
+      req.body.currentUserId = req.session.userId;
+      next();
+      return;
     }
-    console.log(`Auth successful for user ID: ${req.session.userId}`);
-    req.body.currentUserId = req.session.userId;
-    next();
+
+    // If no session, check Authorization header
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      const sessionId = authHeader.substring(7);
+      console.log(`Attempting auth via Bearer token: ${sessionId.substring(0, 8)}...`);
+      
+      // Here we should check if this token is valid
+      // For now, we'll extract the userId from the session store directly
+      // This is a temporary solution - ideally you would use a proper token validation mechanism
+      if (req.session.userId) {
+        console.log(`Auth successful via token for user ID: ${req.session.userId}`);
+        req.body.currentUserId = req.session.userId;
+        next();
+        return;
+      }
+    }
+
+    console.log('Auth failed: No valid session or token');
+    return res.status(401).json({ message: "Unauthorized" });
   };
 
   // Error handling helper
@@ -311,17 +331,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({ message: 'Invalid credentials.' });
     }
+    
+    // Format user before calling session.save to avoid awaiting inside the callback
+    const formattedUser = await formatUser(user);
     const sessionId = crypto.randomBytes(16).toString('hex');
+    
     // Update session creation to include all fields for SessionData
     req.session.userId = user.id;
     req.session.username = user.username;
     req.session.did = user.did ?? null;
-    console.log(`[/api/auth/login] User ${user.username} logged in. Session created: ${sessionId}`);
-    res.cookie('connect.sid', sessionId, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
-    res.json({ 
-        message: 'Logged in successfully', 
-        user: await formatUser(user),
-        sessionId: sessionId
+    
+    // Wait for session to be saved to Redis before responding
+    req.session.save((err) => {
+      if (err) {
+        console.error('[/api/auth/login] Error saving session:', err);
+        return res.status(500).json({ message: 'Session creation failed' });
+      }
+      
+      console.log(`[/api/auth/login] User ${user.username} logged in. Session created: ${sessionId}`);
+      res.cookie('connect.sid', sessionId, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+      res.json({ 
+          message: 'Logged in successfully', 
+          user: formattedUser,
+          sessionId: sessionId
+      });
     });
   });
 

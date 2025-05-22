@@ -13,6 +13,7 @@ export interface User {
   isFollowing?: boolean;
   unreadNotifications?: number;
   joined?: string;
+  language?: string;
 }
 
 // Post types

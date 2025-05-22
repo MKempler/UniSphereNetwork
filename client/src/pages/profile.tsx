@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useLocation } from "wouter";
-import { useTranslation } from "react-i18next";
+import { useTranslation as useI18nTranslation } from "react-i18next";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -15,11 +15,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Post, User } from "@/types";
 import ProfilePictureUpload from '@/components/users/ProfilePictureUpload';
 import EditProfileModal from '@/components/users/EditProfileModal';
+import { LuGlobe } from "react-icons/lu";
+import { LANGUAGE_NAMES } from '@/lib/translation';
 
 export default function Profile() {
   const { username } = useParams<{ username?: string }>();
   const [, navigate] = useLocation();
-  const { t } = useTranslation();
+  const { t } = useI18nTranslation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState("posts");
@@ -165,6 +167,17 @@ export default function Profile() {
             {profileUser!.bio && (
               <p className="mt-2 text-neutral-700 dark:text-neutral-200">{profileUser!.bio}</p>
             )}
+            
+            {/* Language preference */}
+            {profileUser!.language && (
+              <div className="mt-2 flex items-center gap-1.5 text-sm text-neutral-600 dark:text-neutral-300">
+                <LuGlobe className="w-3.5 h-3.5" />
+                <span>
+                  {LANGUAGE_NAMES[profileUser!.language] || profileUser!.language}
+                </span>
+              </div>
+            )}
+            
             <div className="flex mt-3 gap-6">
               <div>
                 <span className="font-bold">{profileUser!.following}</span>{" "}

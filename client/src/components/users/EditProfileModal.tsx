@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -7,6 +7,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import LanguageSelector from "@/components/common/LanguageSelector";
+import { useTranslation } from "@/contexts/TranslationContext";
+import { LuGlobe } from "react-icons/lu";
+import { Label } from "@/components/ui/label";
 
 interface EditProfileModalProps {
   open: boolean;
@@ -16,6 +20,7 @@ interface EditProfileModalProps {
     bio?: string;
     profileImage?: string;
     coverImage?: string;
+    language?: string;
   };
 }
 
@@ -33,6 +38,20 @@ export default function EditProfileModal({ open, onOpenChange, user }: EditProfi
   const queryClient = useQueryClient();
   const profileInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
+  const { userLanguage, setUserLanguage } = useTranslation();
+
+  // Update state when user prop changes
+  useEffect(() => {
+    setName(user.name || "");
+    setBio(user.bio || "");
+    setProfileImage(user.profileImage || "");
+    setCoverImage(user.coverImage || "");
+    
+    // If user has a language preference set, update the context
+    if (user.language) {
+      setUserLanguage(user.language);
+    }
+  }, [user, setUserLanguage]);
 
   // Requirements
   const PROFILE_MAX_SIZE_MB = 5;
@@ -40,7 +59,7 @@ export default function EditProfileModal({ open, onOpenChange, user }: EditProfi
   const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/gif"];
 
   const updateProfileMutation = useMutation({
-    mutationFn: async (payload: { name: string; bio?: string; profileImage?: string; coverImage?: string }) => {
+    mutationFn: async (payload: { name: string; bio?: string; profileImage?: string; coverImage?: string; language?: string }) => {
       return apiRequest("PATCH", "/api/users/me", payload);
     },
     onSuccess: (data: any) => {
@@ -181,7 +200,8 @@ export default function EditProfileModal({ open, onOpenChange, user }: EditProfi
       name, 
       bio, 
       profileImage,
-      coverImage
+      coverImage,
+      language: userLanguage
     });
     setIsSaving(false);
   };
@@ -294,6 +314,20 @@ export default function EditProfileModal({ open, onOpenChange, user }: EditProfi
               <div className="text-xs text-neutral-500 mt-1 text-right">
                 {bio?.length || 0}/160
               </div>
+            </div>
+
+            {/* Language Preference Section */}
+            <div className="pt-2 border-t">
+              <Label className="text-sm font-medium mb-3 block flex items-center gap-1.5">
+                <LuGlobe className="w-4 h-4" />
+                Preferred Language
+              </Label>
+              <div className="mb-2">
+                <p className="text-sm text-muted-foreground">
+                  Content in other languages will be automatically translated to your preferred language.
+                </p>
+              </div>
+              <LanguageSelector />
             </div>
           </div>
         </div>

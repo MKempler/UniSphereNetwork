@@ -51,10 +51,17 @@ export function TranslationProvider({ children }: { children: ReactNode }) {
 
   // Load user language preference from profile when authenticated
   useEffect(() => {
-    if (isAuthenticated && user?.language && user.language !== userLanguage) {
-      setUserLanguageState(user.language);
+    if (isAuthenticated && user?.language) {
+      console.log(`User language from profile: ${user.language}, current language: ${userLanguage}`);
+      
+      if (user.language !== userLanguage) {
+        console.log(`Updating language preference to: ${user.language}`);
+        setUserLanguageState(user.language);
+        // Save to localStorage for persistence
+        localStorage.setItem('userLanguage', user.language);
+      }
     }
-  }, [isAuthenticated, user?.language]);
+  }, [isAuthenticated, user?.language, userLanguage]);
 
   // Update language preference
   const setUserLanguage = useCallback((lang: LanguageCode) => {
