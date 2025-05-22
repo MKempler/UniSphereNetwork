@@ -35,23 +35,49 @@ export async function translateText(text: string, targetLanguage: string = 'en')
   }
 }
 
+// Map of language codes to full language names
+export const LANGUAGE_NAMES: Record<string, string> = {
+  'en': 'English',
+  'es': 'Spanish',
+  'fr': 'French',
+  'de': 'German',
+  'zh': 'Chinese',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'ar': 'Arabic',
+  'hi': 'Hindi',
+  'pt': 'Portuguese',
+  'ru': 'Russian',
+  'it': 'Italian',
+  'nl': 'Dutch',
+  'pl': 'Polish',
+  'tr': 'Turkish',
+  'vi': 'Vietnamese',
+  'th': 'Thai',
+  'id': 'Indonesian',
+  'sv': 'Swedish',
+  'no': 'Norwegian',
+  'fi': 'Finnish',
+  'da': 'Danish',
+  'cs': 'Czech',
+  'hu': 'Hungarian',
+  'el': 'Greek',
+  'he': 'Hebrew',
+  'uk': 'Ukrainian',
+  'ro': 'Romanian',
+  'bg': 'Bulgarian',
+  'sk': 'Slovak',
+  'hr': 'Croatian',
+  'sr': 'Serbian',
+  'sl': 'Slovenian',
+  'et': 'Estonian',
+  'lv': 'Latvian',
+  'lt': 'Lithuanian'
+};
+
 export function getLanguageTag(languageCode: string): string {
-  // Map language codes to display names
-  const languageMap: Record<string, string> = {
-    'en': 'EN',
-    'es': 'ES',
-    'fr': 'FR',
-    'de': 'DE',
-    'zh': 'ZH',
-    'ja': 'JP',
-    'ko': 'KO',
-    'ar': 'AR',
-    'hi': 'HI',
-    'pt': 'PT',
-    'ru': 'RU',
-  };
-  
-  return languageMap[languageCode.toLowerCase()] || languageCode.toUpperCase();
+  // Return the full language name, or the original code if not found
+  return LANGUAGE_NAMES[languageCode.toLowerCase()] || languageCode.toUpperCase();
 }
 
 export function detectLanguage(text: string): Promise<string> {

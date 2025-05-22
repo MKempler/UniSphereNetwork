@@ -2,7 +2,7 @@ import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage.ts";
 import { loginSchema, insertUserSchema, insertPostSchema } from "../shared/schema.ts";
-import { generateTranslation, detectLanguage } from "./translation.ts";
+import { detectLanguage, translateText } from "./translation.ts";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
@@ -840,26 +840,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Translation service
-  app.post("/api/translate", async (req, res) => {
-    try {
-      const { text, targetLanguage = "en" } = req.body;
-      
-      if (!text) {
-        return res.status(400).json({ message: "Text to translate is required" });
-      }
-      
-      const sourceLanguage = await detectLanguage(text);
-      const translatedText = await generateTranslation(text, sourceLanguage, targetLanguage);
-      
-      res.status(200).json({
-        translatedText,
-        detectedSourceLanguage: sourceLanguage
-      });
-    } catch (error) {
-      handleError(error, res);
-    }
-  });
-
   app.post("/api/detect-language", async (req, res) => {
     try {
       const { text } = req.body;
@@ -871,7 +851,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const language = await detectLanguage(text);
       res.status(200).json({ language });
     } catch (error) {
-      handleError(error, res);
+      console.error("Error in /api/detect-language:", error);
+      // Don't fail completely, just return English as fallback
+      res.status(200).json({ language: 'en' });
+    }
+  });
+
+  app.post("/api/translate", async (req, res) => {
+    try {
+      const { text, sourceLanguage, targetLanguage } = req.body;
+      
+      if (!text) {
+        return res.status(400).json({ message: "Text is required" });
+      }
+      
+      if (!targetLanguage) {
+        return res.status(400).json({ message: "Target language is required" });
+      }
+      
+      const translatedText = await translateText(
+        text,
+        sourceLanguage || 'auto',
+        targetLanguage
+      );
+      
+      res.status(200).json({
+        translatedText,
+        sourceLanguage: sourceLanguage || 'auto'
+      });
+    } catch (error) {
+      console.error("Error in /api/translate:", error);
+      // Don't fail completely, just return the original text
+      res.status(200).json({
+        translatedText: text,
+        sourceLanguage: sourceLanguage || 'auto'
+      });
     }
   });
 

@@ -18,7 +18,7 @@ import {
 } from "../shared/schema.ts";
 import { db } from "./db.ts";
 import { eq, and, sql } from "drizzle-orm";
-import { generateTranslation, detectLanguage } from './translation.ts';
+import { translateText, detectLanguage } from './translation.ts';
 
 export interface IStorage {
   // User operations

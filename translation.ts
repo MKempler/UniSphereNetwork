@@ -175,4 +175,4 @@ export async function translateText(
     // Return original text if translation fails
     return text;
   }
-}
+} 

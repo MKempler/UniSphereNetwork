@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@decentralized-identity/ion-tools": "decentralized-identity/ion-tools",
+    "@google-cloud/translate": "^9.1.0",
+    "axios": "^1.6.2",
     "bcrypt": "^5.1.1",
     "connect-redis": "^8.0.3",
     "cors": "^2.8.5",

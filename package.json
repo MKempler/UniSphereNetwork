@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@decentralized-identity/ion-tools": "^1.1.4",
+    "@google-cloud/translate": "^9.1.0",
     "@hookform/resolvers": "^3.10.0",
     "@jridgewell/trace-mapping": "^0.3.25",
     "@neondatabase/serverless": "^0.10.4",
@@ -66,6 +67,7 @@
     "memoizee": "^0.4.17",
     "memorystore": "^1.6.7",
     "next-themes": "^0.4.6",
+    "openai": "^4.102.0",
     "openid-client": "^6.5.0",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",

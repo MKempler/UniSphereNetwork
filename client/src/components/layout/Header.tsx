@@ -1,13 +1,14 @@
 import { Link, useLocation } from "wouter";
-import { useTranslation } from "react-i18next";
+import { useTranslation as useI18nTranslation } from "react-i18next";
 import { Search, Home, Globe, Shield, Bell } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useAuth } from "@/hooks/simpleAuth.js";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { User } from "@/types";
+import LanguageSelector from "@/components/common/LanguageSelector";
 
 export default function Header() {
-  const { t } = useTranslation();
+  const { t } = useI18nTranslation();
   const [location] = useLocation();
   const { user: currentUser, logout } = useAuth();
 
@@ -64,6 +65,8 @@ export default function Header() {
               )}
             </a>
           </Link>
+          
+          <LanguageSelector />
           
           <ThemeToggle />
           

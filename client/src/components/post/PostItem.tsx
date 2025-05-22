@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { Link } from "wouter";
-import { useTranslation } from "react-i18next";
+import { useTranslation as useI18nTranslation } from "react-i18next";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { translateText, getLanguageTag } from "@/lib/translation";
+import { getLanguageTag } from "@/lib/translation";
 import { Post } from "@/types";
 import { useToast } from "@/hooks/use-toast";
+import TranslatedText from "@/components/common/TranslatedText";
+import { LuGlobe } from "react-icons/lu";
 
 interface PostItemProps {
   post: Post;
@@ -19,41 +21,9 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
     return null;
   }
 
-  const { t } = useTranslation();
+  const { t } = useI18nTranslation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  const [showOriginal, setShowOriginal] = useState(true);
-  const [translatedContent, setTranslatedContent] = useState<string | null>(null);
-  const [isTranslating, setIsTranslating] = useState(false);
-
-  const needsTranslation = post.language && post.language !== navigator.language.split('-')[0];
-
-  const translatePost = async () => {
-    if (translatedContent && !showOriginal) {
-      setShowOriginal(true);
-      return;
-    }
-
-    if (translatedContent && showOriginal) {
-      setShowOriginal(false);
-      return;
-    }
-
-    setIsTranslating(true);
-    try {
-      const result = await translateText(post.content);
-      setTranslatedContent(result.translatedText);
-      setShowOriginal(false);
-    } catch (error) {
-      toast({
-        title: "Translation failed",
-        description: "Couldn't translate this post. Try again later.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsTranslating(false);
-    }
-  };
 
   const likePostMutation = useMutation({
     mutationFn: async () => {
@@ -166,7 +136,8 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
               <span className="mx-1 text-neutral-dark opacity-50">•</span>
               <p className="text-sm text-neutral-dark opacity-75">{post.createdAt}</p>
               {post.language && (
-                <span className="ml-2 text-xs px-1.5 py-0.5 rounded font-medium bg-primary/10 text-primary" style={{ opacity: 0.8 }}>
+                <span className="ml-2 text-xs px-2 py-0.5 rounded-md font-medium bg-primary/15 text-primary flex items-center gap-1.5 border border-primary/20">
+                  <LuGlobe className="w-3.5 h-3.5" />
                   {getLanguageTag(post.language)}
                 </span>
               )}
@@ -184,49 +155,23 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
       <div className="mt-3">
         <Link href={`/posts/${post.id}`}>
           <a className="block group">
-            {needsTranslation && !showOriginal && translatedContent ? (
-              <div className="bg-neutral-light rounded-lg p-3 text-sm group-hover:bg-primary/5 transition">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs text-neutral-dark opacity-75">
-                    {t("post.translate")} {post.language.toUpperCase()}
-                  </span>
-                  <button 
-                    className="text-xs text-primary hover:underline"
-                    onClick={e => { e.preventDefault(); translatePost(); }}
-                    disabled={isTranslating}
-                  >
-                    {t("post.show_original")}
-                  </button>
-                </div>
-                <p className="text-neutral-dark">
-                  {translatedContent}
-                </p>
-              </div>
-            ) : (
-              <>
-                <p className="text-neutral-dark mb-3 group-hover:underline cursor-pointer transition">
-                  {post.content}
-                </p>
-                {post.media && (
-                  <img 
-                    src={post.media} 
-                    alt="Post media" 
-                    className="w-full h-auto rounded-xl object-cover group-hover:opacity-90 transition"
-                  />
-                )}
-              </>
+            <TranslatedText
+              text={post.content}
+              as="p"
+              className="text-neutral-dark mb-3 group-hover:underline cursor-pointer transition"
+              showControls={true}
+              originalLanguage={post.language}
+            />
+            
+            {post.media && (
+              <img 
+                src={post.media} 
+                alt="Post media" 
+                className="w-full h-auto rounded-xl object-cover group-hover:opacity-90 transition"
+              />
             )}
           </a>
         </Link>
-        {needsTranslation && showOriginal && (
-          <button 
-            className="text-xs text-primary hover:underline block mb-3"
-            onClick={translatePost}
-            disabled={isTranslating}
-          >
-            {isTranslating ? "Translating..." : t("post.show_translation")}
-          </button>
-        )}
       </div>
       
       {/* Feed divider above actions */}
@@ -250,7 +195,7 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
           <span className="text-sm">{post.repostCount}</span>
         </button>
         <button 
-          className={`flex items-center ${post.isLiked ? 'text-error' : 'text-neutral-dark hover:text-error'} transition-colors mr-6`}
+          className={`flex items-center ${post.isLiked ? 'text-accent' : 'text-neutral-dark hover:text-accent'} transition-colors mr-6`}
           onClick={() => likePostMutation.mutate()}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill={post.isLiked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
@@ -258,21 +203,15 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
           </svg>
           <span className="text-sm">{post.likeCount}</span>
         </button>
-        <div className="flex items-center ml-auto gap-2">
-          <button className="flex items-center text-neutral-dark hover:text-primary transition-colors">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-          </svg>
-        </button>
         <button 
-            className="flex items-center text-neutral-dark hover:text-primary transition-colors"
+          className="flex items-center text-neutral-dark hover:text-primary transition-colors"
           onClick={() => savePostMutation.mutate()}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill={post.isSaved ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
           </svg>
+          <span className="text-sm">Save</span>
         </button>
-        </div>
       </div>
     </div>
   );

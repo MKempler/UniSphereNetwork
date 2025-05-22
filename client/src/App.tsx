@@ -11,6 +11,7 @@ import CircuitsIndexPage from "@/pages/circuits/index";
 import CircuitDetailPage from "@/pages/circuits/[id]";
 import CircuitCreatePage from "@/pages/circuits/create";
 import { useEffect, useState } from "react";
+import { TranslationProvider } from "@/contexts/TranslationContext";
 
 function Router() {
   return (
@@ -42,10 +43,12 @@ function App() {
 
   return (
     <TooltipProvider>
-      <div className="min-h-screen bg-background text-foreground dark:bg-dark-bg">
-        <Toaster />
-        <Router />
-      </div>
+      <TranslationProvider>
+        <div className="min-h-screen bg-background text-foreground dark:bg-dark-bg">
+          <Toaster />
+          <Router />
+        </div>
+      </TranslationProvider>
     </TooltipProvider>
   );
 }
