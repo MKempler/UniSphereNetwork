@@ -1,24 +1,61 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useToast } from "@/hooks/use-toast";
 import { detectLanguage } from "@/lib/translation";
 import { User } from "@/types";
+import { CircuitListItem } from "@/types/circuit";
+import { Check, ChevronDown, Image, LucideGlobe, MessageSquarePlus, SmilePlus } from "lucide-react";
+import { 
+  Popover, 
+  PopoverContent, 
+  PopoverTrigger 
+} from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 
 interface CreatePostFormProps {
   user: User;
+  defaultCircuitId?: number;
 }
 
-export default function CreatePostForm({ user }: CreatePostFormProps) {
+export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFormProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [content, setContent] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedLanguage, setSelectedLanguage] = useState("en");
+  const [selectedCircuit, setSelectedCircuit] = useState<CircuitListItem | null>(null);
+  const [circuitPopoverOpen, setCircuitPopoverOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Fetch user's subscribed circuits
+  const { data: circuits } = useQuery<CircuitListItem[]>({
+    queryKey: ["userSubscribedCircuits"],
+    queryFn: async () => {
+      // Get all circuits
+      const response = await apiRequest("GET", "/api/circuits/popular");
+      const allCircuits = await response.json();
+      
+      // Filter to only include circuits the user is subscribed to
+      return allCircuits.filter((circuit: CircuitListItem) => circuit.isSubscribed);
+    },
+    // Only run this query if user is authenticated
+    enabled: !!user?.id
+  });
+
+  // Set default circuit if provided
+  useEffect(() => {
+    if (defaultCircuitId && circuits) {
+      const circuit = circuits.find(c => c.id === defaultCircuitId);
+      if (circuit) {
+        setSelectedCircuit(circuit);
+      }
+    }
+  }, [defaultCircuitId, circuits]);
 
   // Auto-resize textarea
   const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -36,20 +73,31 @@ export default function CreatePostForm({ user }: CreatePostFormProps) {
   };
 
   const createPostMutation = useMutation({
-    mutationFn: async (newPost: { content: string; language: string }) => {
+    mutationFn: async (newPost: { content: string; language: string; circuitId?: number }) => {
       return apiRequest("POST", "/api/posts", newPost);
     },
-    onSuccess: () => {
+    onSuccess: async (response) => {
+      const post = await response.json();
+      
       setContent("");
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
+      
       toast({
         title: "Success",
-        description: "Your post has been published",
+        description: selectedCircuit 
+          ? `Your post has been published to ${selectedCircuit.name}`
+          : "Your post has been published",
       });
+      
       // Refresh the feed
       queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+      
+      // If post was made to a circuit, refresh that circuit's posts
+      if (selectedCircuit) {
+        queryClient.invalidateQueries({ queryKey: ["circuitDetail", selectedCircuit.id.toString()] });
+      }
     },
     onError: (error) => {
       toast({
@@ -69,82 +117,168 @@ export default function CreatePostForm({ user }: CreatePostFormProps) {
     setIsSubmitting(true);
     createPostMutation.mutate({
       content: content.trim(),
-      language: selectedLanguage
+      language: selectedLanguage,
+      circuitId: selectedCircuit?.id
     });
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm p-4">
+    <div className="relative bg-white dark:bg-neutral-50 border border-neutral-200 shadow rounded-2xl p-4 mb-6">
       <div className="flex">
-        <Avatar className="w-10 h-10 mr-3">
+        <Avatar className="w-12 h-12 mr-4">
           <AvatarImage src={user.profileImage} alt={user.name} />
           <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
         </Avatar>
         <div className="flex-1">
           <textarea 
             ref={textareaRef}
-            placeholder={t("post.create")}
-            className="w-full border border-neutral-medium rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+            placeholder={selectedCircuit 
+              ? t("post.createInCircuit", { circuit: selectedCircuit.name }) 
+              : t("post.create")}
+            className="w-full resize-none border-none outline-none bg-transparent focus:ring-2 focus:ring-primary-500 rounded-xl transition p-3 min-h-[64px] text-base"
             rows={3}
             value={content}
             onChange={handleTextareaChange}
             disabled={isSubmitting}
           />
           
-          <div className="flex justify-between items-center mt-3">
+          {/* Post actions bar */}
+          <div className="flex items-center justify-between mt-3">
             <div className="flex items-center space-x-2">
               <button 
-                className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors" 
+                className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
                 title="Add media"
                 disabled={isSubmitting}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                </svg>
+                <Image className="h-5 w-5" />
               </button>
               <button 
-                className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors" 
+                className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
                 title="Create poll"
                 disabled={isSubmitting}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
+                <MessageSquarePlus className="h-5 w-5" />
               </button>
               <button 
-                className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors" 
+                className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
                 title="Add emoji"
                 disabled={isSubmitting}
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+                <SmilePlus className="h-5 w-5" />
               </button>
+              
+              {/* Language selector */}
               <div className="relative ml-1">
                 <button 
-                  className="flex items-center text-primary text-sm px-2 py-1 rounded-full hover:bg-neutral-light transition-colors"
+                  className="flex items-center text-primary text-sm px-2 py-1 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500"
                   disabled={isSubmitting}
                 >
                   <span className="flex items-center">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-                    </svg>
+                    <LucideGlobe className="h-4 w-4 mr-1" />
                     {selectedLanguage.toUpperCase()}
                   </span>
-                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" />
-                  </svg>
+                  <ChevronDown className="h-4 w-4 ml-1" />
                 </button>
               </div>
+              
+              {/* Circuit selector */}
+              <Popover open={circuitPopoverOpen} onOpenChange={setCircuitPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    className="ml-2 flex items-center h-8 text-xs font-normal"
+                  >
+                    {selectedCircuit ? (
+                      <>
+                        <span 
+                          className="w-3 h-3 rounded-full mr-1"
+                          style={{
+                            backgroundColor: selectedCircuit?.name 
+                              ? `hsl(${selectedCircuit.name.charCodeAt(0) % 360}, 70%, 80%)` 
+                              : 'transparent'
+                          }}
+                        ></span>
+                        {selectedCircuit.name}
+                      </>
+                    ) : (
+                      <>Global</>
+                    )}
+                    <ChevronDown className="ml-1 h-3 w-3" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="p-0" align="start" sideOffset={5}>
+                  <Command>
+                    <CommandInput placeholder="Search circuits..." />
+                    <CommandList>
+                      <CommandEmpty>No circuits found.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          className="flex items-center gap-2 text-sm"
+                          onSelect={() => {
+                            setSelectedCircuit(null);
+                            setCircuitPopoverOpen(false);
+                          }}
+                        >
+                          <div className={`flex items-center gap-2 ${!selectedCircuit ? 'text-primary-500 font-medium' : ''}`}>
+                            <LucideGlobe className="w-4 h-4" />
+                            <span>Global Feed</span>
+                            {!selectedCircuit && (
+                              <Check className="ml-auto h-4 w-4" />
+                            )}
+                          </div>
+                        </CommandItem>
+                        
+                        {circuits && circuits.length > 0 ? (
+                          circuits.map((circuit) => (
+                            <CommandItem
+                              key={circuit.id}
+                              className="flex items-center gap-2 text-sm"
+                              onSelect={() => {
+                                setSelectedCircuit(circuit);
+                                setCircuitPopoverOpen(false);
+                              }}
+                            >
+                              <div className={`flex items-center gap-2 ${selectedCircuit?.id === circuit.id ? 'text-primary-500 font-medium' : ''}`}>
+                                <span 
+                                  className="w-4 h-4 rounded-full"
+                                  style={{
+                                    backgroundColor: circuit.name 
+                                      ? `hsl(${circuit.name.charCodeAt(0) % 360}, 70%, 80%)` 
+                                      : 'transparent'
+                                  }}
+                                ></span>
+                                <span>{circuit.name}</span>
+                                {selectedCircuit?.id === circuit.id && (
+                                  <Check className="ml-auto h-4 w-4" />
+                                )}
+                              </div>
+                            </CommandItem>
+                          ))
+                        ) : (
+                          <div className="p-3 text-xs text-center text-neutral-600 border-t">
+                            <p>You haven't subscribed to any circuits yet.</p>
+                            <a href="/circuits" className="text-primary-500 hover:underline font-medium block mt-1">
+                              Visit the Social Circuits tab to discover and join communities!
+                            </a>
+                          </div>
+                        )}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
-
-            <button 
-              className="bg-primary text-white px-4 py-2 rounded-full font-medium hover:bg-primary-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            
+            {/* Post button */}
+            <Button 
               onClick={handleSubmit}
               disabled={!content.trim() || isSubmitting}
+              size="sm"
+              className="rounded-full px-4"
             >
               {isSubmitting ? "Posting..." : t("post.post")}
-            </button>
+            </Button>
           </div>
         </div>
       </div>

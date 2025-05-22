@@ -36,6 +36,7 @@ i18n
           "nav.theme": "Theme",
           "nav.communities": "Communities",
           "nav.trending": "Trending",
+          "feed.discover": "Discover",
           
           // Auth
           "auth.login": "Login",

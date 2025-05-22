@@ -1,28 +1,31 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { loginSchema, insertUserSchema, insertPostSchema } from "@shared/schema";
-import { generateTranslation, detectLanguage } from "./translation";
+import { storage } from "./storage.ts";
+import { loginSchema, insertUserSchema, insertPostSchema } from "../shared/schema.ts";
+import { generateTranslation, detectLanguage } from "./translation.ts";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 // @ts-ignore: No type definitions for @decentralized-identity/ion-tools
-import * as Ion from '@decentralized-identity/ion-tools';
-import { and, eq } from "drizzle-orm";
+// import * as Ion from '@decentralized-identity/ion-tools';
+import { and, eq, gt, inArray } from "drizzle-orm";
 // @ts-ignore: No type definitions for node-fetch (should be resolved by @types/node-fetch, but just in case)
 import fetch from "node-fetch";
 import { sql } from "drizzle-orm";
-import { follows } from "../shared/schema";
-import { db } from "./db";
+import { follows } from "../shared/schema.ts";
+import { relayed_posts, circuits, circuit_posts, posts } from "../shared/schema.ts";
+import { db } from "./db.ts";
 import bcrypt from "bcrypt";
 import crypto from 'crypto';
+import type { Session } from "express-session";
 
-interface SessionData {
-  userId: number;
-  username: string;
-  did: string | null;
+declare module "express-session" {
+  interface SessionData {
+    userId?: number;
+    username?: string;
+    did?: string | null;
+  }
 }
-const sessions: Record<string, SessionData> = {};
 
 // Node identity (did:web) config
 const NODE_DID = process.env.NODE_DID || "did:web:localhost";
@@ -43,27 +46,17 @@ const NODE_DID_DOC = {
   ]
 };
 
+const RELAY_URL = process.env.RELAY_URL || "http://localhost:5000";
+
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware to check authentication
   const authMiddleware = (req: Request, res: Response, next: () => void) => {
-    const authHeader = req.headers.authorization;
-    const sessionId = authHeader?.split(" ")[1];
-    
-    console.log(`Auth check - Auth Header: ${authHeader}, SessionId: ${sessionId}`);
-    console.log(`Active sessions: ${Object.keys(sessions).length}`);
-    
-    if (!sessionId) {
-      console.log('No session ID in request');
-      return res.status(401).json({ message: "Unauthorized - No session ID" });
+    if (!req.session || !req.session.userId) {
+      console.log('No session or userId in session');
+      return res.status(401).json({ message: "Unauthorized - No session" });
     }
-    
-    if (!sessions[sessionId]) {
-      console.log(`Session ID ${sessionId} not found in active sessions`);
-      return res.status(401).json({ message: "Unauthorized - Invalid session" });
-    }
-    
-    console.log(`Auth successful for user ID: ${sessions[sessionId].userId}`);
-    req.body.currentUserId = sessions[sessionId].userId;
+    console.log(`Auth successful for user ID: ${req.session.userId}`);
+    req.body.currentUserId = req.session.userId;
     next();
   };
 
@@ -184,81 +177,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ message: "Invalid publicKey format. Should be a JSON string." });
     }
 
-    try {
-      console.log('[/api/auth/register] Attempting to resolve DID:', did);
-      const didDocumentResolution = await Ion.resolve(did);
-      console.log('[/api/auth/register] DID resolved. Resolution object:', JSON.stringify(didDocumentResolution, null, 2));
+    // In the /api/auth/register route, comment out or remove the DID resolution/validation block that uses Ion
+    // try {
+    //   console.log('[/api/auth/register] Attempting to resolve DID:', did);
+    //   const didDocumentResolution = await Ion.resolve(did);
+    //   console.log('[/api/auth/register] DID resolved. Resolution object:', JSON.stringify(didDocumentResolution, null, 2));
 
-      if (!didDocumentResolution || !didDocumentResolution.didDocument) {
-        console.error('[/api/auth/register] Ion.resolve did not return a valid DID document structure for DID:', did);
-        return res.status(400).json({ message: "Failed to resolve DID: No DID document found in resolution result." });
-      }
-      
-      const didDocument = didDocumentResolution.didDocument;
-      let actualPublicKeyJwk = null;
-
-      // Corrected logic to find the public key based on DID Document structure
-      if (didDocument.verificationMethod && Array.isArray(didDocument.verificationMethod)) {
-        for (const vm of didDocument.verificationMethod) {
-          if (vm.id && vm.publicKeyJwk) {
-            // Check if this verification method is used for authentication or assertion
-            const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === vm.id) || (typeof auth === 'object' && auth?.id === vm.id));
-            const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === vm.id) || (typeof assert === 'object' && assert?.id === vm.id));
-            
-            // DID Core spec allows purposes to be directly in verificationMethod too, though ion-tools output seems to use the reference model primarily.
-            // We check for direct purposes as a fallback.
-            const directPurposes = vm.purposes && Array.isArray(vm.purposes) && (vm.purposes.includes('authentication') || vm.purposes.includes('assertionMethod'));
-
-            if (isAuthMethod || isAssertionMethod || directPurposes) {
-              actualPublicKeyJwk = vm.publicKeyJwk;
-              console.log(`[/api/auth/register] Found matching publicKeyJwk in verificationMethod with id: ${vm.id}`);
-              break; // Found the key
-            }
-          }
-        }
-      }
-
-      if (!actualPublicKeyJwk) {
-          // Fallback: Check the deprecated `publicKey` section if it exists (less common for ION DIDs but good for robustness)
-          if (didDocument.publicKey && Array.isArray(didDocument.publicKey)) {
-              console.log('[/api/auth/register] Checking deprecated publicKey array in DID document.');
-              for (const pk of didDocument.publicKey) {
-                  if (pk.id && pk.publicKeyJwk && pk.type === 'EcdsaSecp256k1VerificationKey2019') {
-                       // Check if this public key is referenced in authentication or assertionMethod
-                      const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === pk.id) || (typeof auth === 'object' && auth?.id === pk.id));
-                      const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === pk.id) || (typeof assert === 'object' && assert?.id === pk.id));
-                      
-                      if (isAuthMethod || isAssertionMethod) {
-                          actualPublicKeyJwk = pk.publicKeyJwk;
-                          console.log(`[/api/auth/register] Found matching publicKeyJwk in deprecated publicKey array with id: ${pk.id}`);
-                          break;
-                      }
-                  }
-              }
-          }
-      }
-
-      if (!actualPublicKeyJwk) {
-          console.error('[/api/auth/register] Could not find a suitable public key in DID document for DID:', did, 'Document:', JSON.stringify(didDocument, null, 2));
-          return res.status(400).json({ message: "Failed to extract a suitable public key from DID document for validation." });
-      }
-      
-      const providedKeyString = JSON.stringify(parsedPublicKey, Object.keys(parsedPublicKey).sort());
-      const resolvedKeyString = JSON.stringify(actualPublicKeyJwk, Object.keys(actualPublicKeyJwk).sort());
-
-      console.log('[/api/auth/register] Provided PublicKey for comparison:', providedKeyString);
-      console.log('[/api/auth/register] Resolved PublicKeyJwk from DID for comparison:', resolvedKeyString);
-
-      if (providedKeyString !== resolvedKeyString) {
-        console.error('[/api/auth/register] Public key mismatch. Provided:', providedKeyString, 'Resolved from DID:', resolvedKeyString);
-        return res.status(400).json({ message: "Public key mismatch between provided key and DID document." });
-      }
-      console.log('[/api/auth/register] DID and PublicKey validated successfully.');
-
-    } catch (error: any) {
-      console.error('[/api/auth/register] Error during DID resolution/validation for DID:', did, error);
-      return res.status(400).json({ message: "Failed to resolve/validate DID.", errorName: error.name, errorMessage: error.message });
-    }
+    //   if (!didDocumentResolution || !didDocumentResolution.didDocument) {
+    //     console.error('[/api/auth/register] Ion.resolve did not return a valid DID document structure for DID:', did);
+    //     return res.status(400).json({ message: "Failed to resolve DID: No DID document found in resolution result." });
+    //   }
+    //   
+    //   const didDocument = didDocumentResolution.didDocument;
+    //   let actualPublicKeyJwk = null;
+    //
+    //   // Corrected logic to find the public key based on DID Document structure
+    //   if (didDocument.verificationMethod && Array.isArray(didDocument.verificationMethod)) {
+    //     for (const vm of didDocument.verificationMethod) {
+    //       if (vm.id && vm.publicKeyJwk) {
+    //         // Check if this verification method is used for authentication or assertion
+    //         const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === vm.id) || (typeof auth === 'object' && auth?.id === vm.id));
+    //         const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === vm.id) || (typeof assert === 'object' && assert?.id === vm.id));
+    //         
+    //         // DID Core spec allows purposes to be directly in verificationMethod too, though ion-tools output seems to use the reference model primarily.
+    //         // We check for direct purposes as a fallback.
+    //         const directPurposes = vm.purposes && Array.isArray(vm.purposes) && (vm.purposes.includes('authentication') || vm.purposes.includes('assertionMethod'));
+    //
+    //         if (isAuthMethod || isAssertionMethod || directPurposes) {
+    //           actualPublicKeyJwk = vm.publicKeyJwk;
+    //           console.log(`[/api/auth/register] Found matching publicKeyJwk in verificationMethod with id: ${vm.id}`);
+    //           break; // Found the key
+    //         }
+    //       }
+    //     }
+    //   }
+    //
+    //   if (!actualPublicKeyJwk) {
+    //       // Fallback: Check the deprecated `publicKey` section if it exists (less common for ION DIDs but good for robustness)
+    //       if (didDocument.publicKey && Array.isArray(didDocument.publicKey)) {
+    //           console.log('[/api/auth/register] Checking deprecated publicKey array in DID document.');
+    //           for (const pk of didDocument.publicKey) {
+    //               if (pk.id && pk.publicKeyJwk && pk.type === 'EcdsaSecp256k1VerificationKey2019') {
+    //                    // Check if this public key is referenced in authentication or assertionMethod
+    //                   const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === pk.id) || (typeof auth === 'object' && auth?.id === pk.id));
+    //                   const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === pk.id) || (typeof assert === 'object' && assert?.id === pk.id));
+    //                   
+    //                   if (isAuthMethod || isAssertionMethod) {
+    //                       actualPublicKeyJwk = pk.publicKeyJwk;
+    //                       console.log(`[/api/auth/register] Found matching publicKeyJwk in deprecated publicKey array with id: ${pk.id}`);
+    //                       break;
+    //                   }
+    //               }
+    //           }
+    //       }
+    //   }
+    //
+    //   if (!actualPublicKeyJwk) {
+    //       console.error('[/api/auth/register] Could not find a suitable public key in DID document for DID:', did, 'Document:', JSON.stringify(didDocument, null, 2));
+    //       return res.status(400).json({ message: "Failed to extract a suitable public key from DID document for validation." });
+    //   }
+    //   
+    //   const providedKeyString = JSON.stringify(parsedPublicKey, Object.keys(parsedPublicKey).sort());
+    //   const resolvedKeyString = JSON.stringify(actualPublicKeyJwk, Object.keys(actualPublicKeyJwk).sort());
+    //
+    //   console.log('[/api/auth/register] Provided PublicKey for comparison:', providedKeyString);
+    //   console.log('[/api/auth/register] Resolved PublicKeyJwk from DID for comparison:', resolvedKeyString);
+    //
+    //   if (providedKeyString !== resolvedKeyString) {
+    //     console.error('[/api/auth/register] Public key mismatch. Provided:', providedKeyString, 'Resolved from DID:', resolvedKeyString);
+    //     return res.status(400).json({ message: "Public key mismatch between provided key and DID document." });
+    //   }
+    //   console.log('[/api/auth/register] DID and PublicKey validated successfully.');
+    //
+    // } catch (error: any) {
+    //   console.error('[/api/auth/register] Error during DID resolution/validation for DID:', did, error);
+    //   return res.status(400).json({ message: "Failed to resolve/validate DID.", errorName: error.name, errorMessage: error.message });
+    // }
 
     try {
       const newUser = await storage.createUser({
@@ -279,7 +273,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userDidForSession: string | null = newUser.did ?? null;
 
       const sessionId = crypto.randomBytes(16).toString('hex');
-      sessions[sessionId] = { userId: newUser.id, username: newUser.username, did: userDidForSession };
+      req.session.userId = newUser.id;
+      req.session.username = newUser.username;
+      req.session.did = userDidForSession;
       console.log(`[/api/auth/register] User ${newUser.username} registered. Session created: ${sessionId}`);
       res.cookie('connect.sid', sessionId, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
       res.status(201).json({
@@ -316,7 +312,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     const sessionId = crypto.randomBytes(16).toString('hex');
     // Update session creation to include all fields for SessionData
-    sessions[sessionId] = { userId: user.id, username: user.username, did: user.did ?? null };
+    req.session.userId = user.id;
+    req.session.username = user.username;
+    req.session.did = user.did ?? null;
     console.log(`[/api/auth/login] User ${user.username} logged in. Session created: ${sessionId}`);
     res.cookie('connect.sid', sessionId, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
     res.json({ 
@@ -337,11 +335,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).json({ message: "No session ID provided" });
     }
     
-    if (sessions[sessionId]) {
-      const userId = sessions[sessionId].userId;
+    if (req.session) {
+      const userId = req.session.userId;
       console.log(`Logging out user ID ${userId} with session ${sessionId}`);
-      delete sessions[sessionId];
-      console.log(`Session removed, remaining sessions: ${Object.keys(sessions).length}`);
+      req.session.destroy((err) => {
+        if (err) {
+          console.error('Error destroying session:', err);
+        }
+      });
+      console.log(`Session removed, remaining sessions: ${Object.keys(req.session).length}`);
       return res.status(200).json({ message: "Logged out successfully" });
     } else {
       console.log(`Logout: Session ID ${sessionId} not found`);
@@ -382,7 +384,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const currentUserId = req.headers.authorization ? 
-        sessions[req.headers.authorization.split(" ")[1]]?.userId : undefined;
+        req.session?.userId : undefined;
       
       res.status(200).json(await formatUser(user, currentUserId));
     } catch (error) {
@@ -398,7 +400,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const posts = await storage.getUserPosts(userId);
       
       const currentUserId = req.headers.authorization ? 
-        sessions[req.headers.authorization.split(" ")[1]]?.userId : undefined;
+        req.session?.userId : undefined;
       
       const formattedPosts = await Promise.all(
         posts.map(post => formatPost(post, currentUserId))
@@ -472,7 +474,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/users/suggested", async (req, res) => {
     try {
       const currentUserId = req.headers.authorization ? 
-        sessions[req.headers.authorization.split(" ")[1]]?.userId : undefined;
+        req.session?.userId : undefined;
       
       let suggestedUsers = await storage.getSuggestedUsers(currentUserId);
       
@@ -493,7 +495,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const page = parseInt(req.query.page as string || "1");
       const limit = 10;
       const currentUserId = req.headers.authorization ? 
-        sessions[req.headers.authorization.split(" ")[1]]?.userId : undefined;
+        req.session?.userId : undefined;
       
       let posts: any[] = [];
       if (feedType === "following" && currentUserId) {
@@ -523,8 +525,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } else if (feedType === "circuits" && currentUserId) {
         posts = await storage.getCircuitPosts(currentUserId, page, limit);
+      } else if (feedType === "discover") {
+        // Discover feed: show relayed posts
+        const offset = (page - 1) * limit;
+        const relayed = await db.select().from(relayed_posts)
+          .orderBy(relayed_posts.relayedAt)
+          .limit(limit)
+          .offset(offset);
+        // Format relayed posts for the feed
+        posts = relayed.map(post => ({
+          id: `relay-${post.id}`,
+          content: post.content,
+          media: post.media,
+          language: post.language,
+          createdAt: post.originalCreatedAt,
+          author: {
+            id: null,
+            username: post.authorDid,
+            name: post.authorDid,
+            profileImage: "/default-profile.png",
+            isVerified: false
+          },
+          likeCount: 0,
+          commentCount: 0,
+          repostCount: 0,
+          isLiked: false,
+          isReposted: false,
+          isSaved: false,
+          circuitId: null,
+          circuitName: null
+        })).reverse(); // reverse for DESC order
       } else {
         posts = await storage.getAllPosts(page, limit);
+      }
+      // For all non-discover feeds, format posts with author info
+      if (feedType !== "discover") {
+        posts = await Promise.all(posts.map(post => formatPost(post, currentUserId)));
+        posts = posts.filter(Boolean); // Remove any nulls
       }
       // Sort posts by createdAt descending
       posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -555,11 +592,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         circuitId: circuitId ? parseInt(circuitId) : undefined
       });
       
+      // If the post is associated with a circuit, add it to circuit_posts
+      if (circuitId) {
+        const circuitIdNum = parseInt(circuitId);
+        await db.insert(circuit_posts).values({
+          circuitId: circuitIdNum,
+          postId: newPost.id,
+          addedByUserId: userId,
+          addedAt: new Date()
+        });
+      }
+      
       // Extract hashtags and update trends
       const hashtags = content.match(/#\w+/g) || [];
       for (const hashtag of hashtags) {
         await storage.updateTrend(hashtag, "Trending");
       }
+
+      // --- Relay submission logic ---
+      try {
+        // Get the author's DID
+        const author = await storage.getUser(userId);
+        const authorDid = author?.did;
+        if (authorDid) {
+          await fetch(`${RELAY_URL}/api/relay/submit`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              originalPostId: newPost.id.toString(),
+              authorDid,
+              content: newPost.content,
+              media: newPost.media,
+              language: newPost.language,
+              originalCreatedAt: newPost.createdAt,
+              sourceRelayUrl: process.env.NODE_URL || "http://localhost:5000"
+            })
+          });
+        }
+      } catch (relayErr) {
+        console.error("[Relay] Failed to submit post to relay:", relayErr);
+      }
+      // --- End relay submission logic ---
       
       res.status(201).json(await formatPost(newPost, userId));
     } catch (error) {
@@ -668,7 +741,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/circuits/popular", async (req, res) => {
     try {
       const currentUserId = req.headers.authorization ? 
-        sessions[req.headers.authorization.split(" ")[1]]?.userId : undefined;
+        req.session?.userId : undefined;
       
       const circuits = await storage.getPopularCircuits();
       
@@ -687,8 +760,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description: circuit.description,
           creatorId: circuit.creatorId,
           creatorName: creator?.name,
-          color: circuit.color,
-          type: circuit.type,
           subscriberCount,
           isSubscribed
         };
@@ -810,6 +881,228 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const posts = await storage.getUserPosts(user.id);
       res.json(posts);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // --- RELAY ENDPOINTS ---
+  // Accept a public post from another node and store it in relayed_posts
+  app.post('/api/relay/submit', async (req, res) => {
+    try {
+      const { originalPostId, authorDid, content, media, language, originalCreatedAt, sourceRelayUrl } = req.body;
+      if (!authorDid || !content || !originalCreatedAt || !sourceRelayUrl) {
+        return res.status(400).json({ message: 'Missing required fields.' });
+      }
+      // Insert into relayed_posts
+      await db.insert(relayed_posts).values({
+        originalPostId,
+        authorDid,
+        content,
+        media,
+        language,
+        originalCreatedAt: new Date(originalCreatedAt),
+        relayedAt: new Date(),
+        sourceRelayUrl
+      });
+      res.status(201).json({ message: 'Relayed post stored.' });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Return relayed posts (optionally paginated or filtered by since)
+  app.get('/api/relay/posts', async (req, res) => {
+    try {
+      const { since, page = 1, limit = 20 } = req.query;
+      const offset = (Number(page) - 1) * Number(limit);
+      let posts;
+      if (since) {
+        posts = await db.select().from(relayed_posts)
+          .where(gt(relayed_posts.relayedAt, new Date(since as string)))
+          .orderBy(relayed_posts.relayedAt)
+          .limit(Number(limit))
+          .offset(offset);
+      } else {
+        posts = await db.select().from(relayed_posts)
+          .orderBy(relayed_posts.relayedAt)
+          .limit(Number(limit))
+          .offset(offset);
+      }
+      res.status(200).json(posts.reverse());
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Fetch new relayed posts from the relay and store them locally
+  app.post('/api/relay/fetch-latest', async (req, res) => {
+    try {
+      // Find the most recent relayedAt timestamp in local relayed_posts
+      const latest = await db.select({ relayedAt: relayed_posts.relayedAt })
+        .from(relayed_posts)
+        .orderBy(relayed_posts.relayedAt)
+        .limit(1);
+      const since = latest.length > 0 ? latest[0].relayedAt.toISOString() : undefined;
+      // Fetch from relay
+      const url = since ? `${RELAY_URL}/api/relay/posts?since=${encodeURIComponent(since)}` : `${RELAY_URL}/api/relay/posts`;
+      const resp = await fetch(url);
+      if (!resp.ok) {
+        return res.status(502).json({ message: 'Failed to fetch from relay', status: resp.status });
+      }
+      const posts = await resp.json();
+      let imported = 0;
+      for (const post of posts) {
+        // Check for duplicate (by originalPostId and sourceRelayUrl)
+        const exists = await db.select().from(relayed_posts)
+          .where(and(
+            eq(relayed_posts.originalPostId, post.originalPostId),
+            eq(relayed_posts.sourceRelayUrl, post.sourceRelayUrl)
+          ));
+        if (exists.length === 0) {
+          await db.insert(relayed_posts).values({
+            originalPostId: post.originalPostId,
+            authorDid: post.authorDid,
+            content: post.content,
+            media: post.media,
+            language: post.language,
+            originalCreatedAt: new Date(post.originalCreatedAt),
+            relayedAt: new Date(post.relayedAt || Date.now()),
+            sourceRelayUrl: post.sourceRelayUrl
+          });
+          imported++;
+        }
+      }
+      res.status(200).json({ imported });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // --- Social Circuits API ---
+  // Create a new circuit
+  app.post('/api/circuits', authMiddleware, async (req, res) => {
+    try {
+      const { name, description } = req.body;
+      const creatorId = req.body.currentUserId;
+      if (!name) return res.status(400).json({ message: 'Name is required' });
+      const circuit = await storage.createCircuit({ name, description, creatorId });
+      res.status(201).json(circuit);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // List all public circuits (paginated)
+  app.get('/api/circuits', async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string || '1');
+      const limit = parseInt(req.query.limit as string || '10');
+      const circuitList = await db.select().from(circuits)
+        .where(eq(circuits.isPublic, true))
+        .orderBy(sql`${circuits.createdAt} DESC`)
+        .limit(limit)
+        .offset((page - 1) * limit);
+      res.status(200).json(circuitList);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Get circuit details and posts (paginated)
+  app.get('/api/circuits/:id', async (req, res) => {
+    try {
+      const circuitId = parseInt(req.params.id);
+      const page = parseInt(req.query.page as string || '1');
+      const limit = parseInt(req.query.limit as string || '10');
+      const circuit = await storage.getCircuit(circuitId);
+      if (!circuit) return res.status(404).json({ message: 'Circuit not found' });
+      // Get posts in this circuit (from circuit_posts)
+      const postLinks = await db.select().from(circuit_posts)
+        .where(eq(circuit_posts.circuitId, circuitId))
+        .orderBy(sql`${circuit_posts.addedAt} DESC`)
+        .limit(limit)
+        .offset((page - 1) * limit);
+      const postIds = postLinks.map(link => Number(link.postId));
+      let circuitPostsRaw: any[] = [];
+      if (postIds.length > 0) {
+        circuitPostsRaw = await db.select().from(posts).where(inArray(posts.id, postIds));
+      }
+      // Check if the current user is subscribed
+      let isSubscribed = false;
+      let currentUserId = undefined;
+      const authHeader = req.headers.authorization;
+      const sessionId = authHeader?.split(" ")[1];
+      if (sessionId && req.session) {
+        currentUserId = req.session.userId;
+        isSubscribed = await storage.isSubscribedToCircuit(currentUserId, circuitId);
+      }
+      // Enrich posts with author info and interaction state
+      const formattedPosts: any[] = await Promise.all(
+        circuitPostsRaw.map((post: any) => formatPost(post, currentUserId))
+      );
+      // Get total post count for pagination
+      const totalPostsResult = await db.select({ count: sql`count(*)` }).from(circuit_posts).where(eq(circuit_posts.circuitId, circuitId));
+      const totalPosts = Number(totalPostsResult[0]?.count || 0);
+      const totalPages = Math.max(1, Math.ceil(totalPosts / limit));
+      res.status(200).json({ circuit, posts: formattedPosts, isSubscribed, totalPages, page });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Subscribe to a circuit
+  app.post('/api/circuits/:id/subscribe', authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const circuitId = parseInt(req.params.id);
+      const subscription = await storage.subscribeToCircuit(userId, circuitId);
+      res.status(201).json(subscription);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Unsubscribe from a circuit
+  app.delete('/api/circuits/:id/subscribe', authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const circuitId = parseInt(req.params.id);
+      await storage.unsubscribeFromCircuit(userId, circuitId);
+      res.status(204).end();
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Add a post to a circuit (only creator)
+  app.post('/api/circuits/:id/posts', authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const circuitId = parseInt(req.params.id);
+      const { postId } = req.body;
+      const circuit = await storage.getCircuit(circuitId);
+      if (!circuit) return res.status(404).json({ message: 'Circuit not found' });
+      if (circuit.creatorId !== userId) return res.status(403).json({ message: 'Only the creator can add posts' });
+      // Add post to circuit_posts
+      const [link] = await db.insert(circuit_posts).values({ circuitId, postId, addedByUserId: userId, addedAt: new Date() }).returning();
+      res.status(201).json(link);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Remove a post from a circuit (only creator)
+  app.delete('/api/circuits/:id/posts/:postId', authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const circuitId = parseInt(req.params.id);
+      const postId = parseInt(req.params.postId);
+      const circuit = await storage.getCircuit(circuitId);
+      if (!circuit) return res.status(404).json({ message: 'Circuit not found' });
+      if (circuit.creatorId !== userId) return res.status(403).json({ message: 'Only the creator can remove posts' });
+      await db.delete(circuit_posts).where(and(eq(circuit_posts.circuitId, circuitId), eq(circuit_posts.postId, postId)));
+      res.status(204).end();
     } catch (error) {
       handleError(error, res);
     }

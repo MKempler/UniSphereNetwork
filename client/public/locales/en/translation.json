@@ -1,0 +1,19 @@
+{
+  "nav.main": "Main",
+  "nav.home": "Home",
+  "nav.explore": "Explore",
+  "nav.notifications": "Notifications",
+  "nav.messages": "Messages",
+  "nav.discover": "Discover",
+  "nav.circuits": "Circuits",
+  "nav.communities": "Communities",
+  "nav.trending": "Trending",
+  "nav.settings": "Settings",
+  "nav.help": "Help",
+  "auth.login": "Login",
+  "auth.logout": "Logout",
+  "auth.register": "Register",
+  "user.follow": "Follow",
+  "user.unfollow": "Unfollow",
+  "user.following": "Following"
+} 

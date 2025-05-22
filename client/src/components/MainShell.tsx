@@ -7,23 +7,19 @@ interface MainShellProps {
 }
 
 const MainShell: React.FC<MainShellProps> = ({ leftNav, rightAside, children }) => (
-  <div className="max-w-[1280px] mx-auto flex flex-col gap-6 lg:flex-row lg:gap-8 px-4 sm:px-6">
+  <div className="flex justify-center lg:gap-0 bg-white min-h-screen">
     {/* Left Navigation - only visible on lg+ */}
     {leftNav && (
-      <aside className="hidden lg:block flex-shrink-0 w-[240px] sticky top-0 h-screen" role="navigation" aria-label="Main navigation">
+      <aside className="hidden lg:block flex-shrink-0 w-[260px] sticky top-0 h-screen bg-neutral-50 border-r border-neutral-200 dark:bg-neutral-900 dark:border-neutral-800" role="navigation" aria-label="Main navigation">
         {leftNav}
       </aside>
     )}
-    {/* Main Content */}
-    <main className="flex-1 min-w-0" tabIndex={-1}>
+    <div className="flex flex-1 max-w-screen-xl">
+      <main className="flex-1 px-6 py-4 min-w-0" tabIndex={-1}>
       {children}
     </main>
-    {/* Right Sidebar - only visible on xl+ */}
-    {rightAside && (
-      <aside className="hidden xl:block flex-shrink-0 w-[320px]" role="complementary" aria-label="Right sidebar">
         {rightAside}
-      </aside>
-    )}
+    </div>
   </div>
 );
 

@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, json } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, json, varchar, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -61,23 +61,36 @@ export const comments = pgTable("comments", {
 });
 
 // Circuits (curated feeds)
-export const circuits = pgTable("circuits", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description").notNull(),
-  creatorId: integer("creator_id").notNull(),
-  color: text("color"),
-  type: text("type").notNull().default("other"), // "news", "photography", "tech", "other"
-  createdAt: timestamp("created_at").notNull().defaultNow()
+export const circuits = pgTable('circuits', {
+  id: serial('id').primaryKey(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  creatorId: integer('creator_id').notNull().references(() => users.id),
+  isPublic: boolean('is_public').default(true).notNull(),
+  curationType: varchar('curation_type', { length: 50 }).default('manual').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
 // Circuit Subscriptions
-export const circuitSubscriptions = pgTable("circuit_subscriptions", {
-  id: serial("id").primaryKey(),
-  circuitId: integer("circuit_id").notNull(),
-  userId: integer("user_id").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow()
-});
+export const circuit_subscriptions = pgTable('circuit_subscriptions', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id),
+  circuitId: integer('circuit_id').notNull().references(() => circuits.id),
+  subscribedAt: timestamp('subscribed_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  userCircuitUnique: unique().on(table.userId, table.circuitId),
+}));
+
+export const circuit_posts = pgTable('circuit_posts', {
+  id: serial('id').primaryKey(),
+  circuitId: integer('circuit_id').notNull().references(() => circuits.id),
+  postId: integer('post_id').notNull().references(() => posts.id),
+  addedByUserId: integer('added_by_user_id').notNull().references(() => users.id),
+  addedAt: timestamp('added_at', { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  circuitPostUnique: unique().on(table.circuitId, table.postId),
+}));
 
 // Communities (server nodes)
 export const communities = pgTable("communities", {
@@ -115,6 +128,19 @@ export const notifications = pgTable("notifications", {
   postId: integer("post_id"), // Optional, for post-related notifications
   data: json("data"), // Additional data as needed
   createdAt: timestamp("created_at").notNull().defaultNow()
+});
+
+// Relayed Posts
+export const relayed_posts = pgTable('relayed_posts', {
+  id: serial('id').primaryKey(),
+  originalPostId: varchar('original_post_id', { length: 255 }),
+  authorDid: varchar('author_did', { length: 255 }).notNull(),
+  content: text('content').notNull(),
+  media: text('media'),
+  language: varchar('language', { length: 32 }),
+  originalCreatedAt: timestamp('original_created_at', { withTimezone: true }).notNull(),
+  relayedAt: timestamp('relayed_at', { withTimezone: true }).notNull(),
+  sourceRelayUrl: varchar('source_relay_url', { length: 255 }).notNull(),
 });
 
 // Create schemas for insertable data
@@ -162,12 +188,10 @@ export const insertCommentSchema = createInsertSchema(comments).pick({
 export const insertCircuitSchema = createInsertSchema(circuits).pick({
   name: true,
   description: true,
-  creatorId: true,
-  color: true,
-  type: true
+  creatorId: true
 });
 
-export const insertCircuitSubscriptionSchema = createInsertSchema(circuitSubscriptions).pick({
+export const insertCircuitSubscriptionSchema = createInsertSchema(circuit_subscriptions).pick({
   circuitId: true,
   userId: true
 });
@@ -217,7 +241,7 @@ export type Follow = typeof follows.$inferSelect;
 export type PostInteraction = typeof postInteractions.$inferSelect;
 export type Comment = typeof comments.$inferSelect;
 export type Circuit = typeof circuits.$inferSelect;
-export type CircuitSubscription = typeof circuitSubscriptions.$inferSelect;
+export type CircuitSubscription = typeof circuit_subscriptions.$inferSelect;
 export type Community = typeof communities.$inferSelect;
 export type CommunityMember = typeof communityMembers.$inferSelect;
 export type Trend = typeof trends.$inferSelect;

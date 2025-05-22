@@ -7,6 +7,9 @@ import Login from "@/pages/auth/login";
 import Register from "@/pages/auth/register";
 import Profile from "@/pages/profile";
 import Debug from "@/pages/debug";
+import CircuitsIndexPage from "@/pages/circuits/index";
+import CircuitDetailPage from "@/pages/circuits/[id]";
+import CircuitCreatePage from "@/pages/circuits/create";
 import { useEffect, useState } from "react";
 
 function Router() {
@@ -16,6 +19,9 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/profile/:username?" component={Profile} />
+      <Route path="/circuits" component={CircuitsIndexPage} />
+      <Route path="/circuits/create" component={CircuitCreatePage} />
+      <Route path="/circuits/:id" component={CircuitDetailPage} />
       <Route path="/debug" component={Debug} />
       <Route component={NotFound} />
     </Switch>

@@ -177,3 +177,6 @@
     background-color: var(--color-dark-bg);
   }
 }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

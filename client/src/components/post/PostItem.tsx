@@ -107,19 +107,34 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
   });
 
   return (
-    <div className="bg-white rounded-xl shadow-sm p-4">
+    <div className="bg-neutral-50 rounded-2xl shadow p-4 mb-4 hover:shadow-md hover:-translate-y-0.5 transition focus-within:ring-1 ring-primary-500">
       {/* Circuit Header (if from a circuit) */}
-      {isCircuitPost && circuitName && (
+      {post.circuitId && post.circuitName ? (
         <div className="flex items-center mb-3">
-          <div className="bg-accent rounded-full w-8 h-8 flex items-center justify-center text-white mr-2">
+          <div className="bg-primary-500 rounded-full w-8 h-8 flex items-center justify-center text-white mr-2">
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
           </div>
           <div>
-            <p className="text-sm text-neutral-dark opacity-75">
-              From <Link href={`/circuits/${post.circuitId}`}><a className="text-primary font-medium hover:underline">{circuitName}</a></Link>
-            </p>
+            <Link href={`/circuits/${post.circuitId}`}>
+              <a className="text-sm font-medium text-primary-500 hover:underline">
+                Posted in {post.circuitName}
+              </a>
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center mb-3">
+          <div className="bg-neutral-300 rounded-full w-8 h-8 flex items-center justify-center text-white mr-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          </div>
+          <div>
+            <span className="text-sm text-neutral-500">
+              Global post
+            </span>
           </div>
         </div>
       )}
@@ -136,7 +151,7 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
             </a>
           </Link>
           <div className="ml-3">
-            <div className="flex items-center">
+            <div className="flex items-center mb-1 gap-1">
               <Link href={`/profile/${post.author.username}`}>
                 <a className="font-semibold text-neutral-dark hover:underline">{post.author.name}</a>
               </Link>
@@ -146,12 +161,12 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
                 </svg>
               )}
             </div>
-            <div className="flex items-center">
+            <div className="flex items-center gap-1" style={{ marginBottom: 4 }}>
               <p className="text-sm text-neutral-dark opacity-75">@{post.author.username}</p>
               <span className="mx-1 text-neutral-dark opacity-50">•</span>
               <p className="text-sm text-neutral-dark opacity-75">{post.createdAt}</p>
               {post.language && (
-                <span className="ml-2 text-xs px-1.5 py-0.5 rounded font-medium bg-primary/10 text-primary">
+                <span className="ml-2 text-xs px-1.5 py-0.5 rounded font-medium bg-primary/10 text-primary" style={{ opacity: 0.8 }}>
                   {getLanguageTag(post.language)}
                 </span>
               )}
@@ -167,54 +182,58 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
       
       {/* Post Content */}
       <div className="mt-3">
-        {needsTranslation && !showOriginal && translatedContent ? (
-          <>
-            <div className="bg-neutral-light rounded-lg p-3 text-sm">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-xs text-neutral-dark opacity-75">
-                  {t("post.translate")} {post.language.toUpperCase()}
-                </span>
-                <button 
-                  className="text-xs text-primary hover:underline"
-                  onClick={translatePost}
-                  disabled={isTranslating}
-                >
-                  {t("post.show_original")}
-                </button>
+        <Link href={`/posts/${post.id}`}>
+          <a className="block group">
+            {needsTranslation && !showOriginal && translatedContent ? (
+              <div className="bg-neutral-light rounded-lg p-3 text-sm group-hover:bg-primary/5 transition">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs text-neutral-dark opacity-75">
+                    {t("post.translate")} {post.language.toUpperCase()}
+                  </span>
+                  <button 
+                    className="text-xs text-primary hover:underline"
+                    onClick={e => { e.preventDefault(); translatePost(); }}
+                    disabled={isTranslating}
+                  >
+                    {t("post.show_original")}
+                  </button>
+                </div>
+                <p className="text-neutral-dark">
+                  {translatedContent}
+                </p>
               </div>
-              <p className="text-neutral-dark">
-                {translatedContent}
-              </p>
-            </div>
-          </>
-        ) : (
-          <>
-            <p className="text-neutral-dark mb-3">
-              {post.content}
-            </p>
-            {needsTranslation && (
-              <button 
-                className="text-xs text-primary hover:underline block mb-3"
-                onClick={translatePost}
-                disabled={isTranslating}
-              >
-                {isTranslating ? "Translating..." : t("post.show_translation")}
-              </button>
+            ) : (
+              <>
+                <p className="text-neutral-dark mb-3 group-hover:underline cursor-pointer transition">
+                  {post.content}
+                </p>
+                {post.media && (
+                  <img 
+                    src={post.media} 
+                    alt="Post media" 
+                    className="w-full h-auto rounded-xl object-cover group-hover:opacity-90 transition"
+                  />
+                )}
+              </>
             )}
-          </>
-        )}
-        
-        {post.media && (
-          <img 
-            src={post.media} 
-            alt="Post media" 
-            className="w-full h-auto rounded-xl object-cover"
-          />
+          </a>
+        </Link>
+        {needsTranslation && showOriginal && (
+          <button 
+            className="text-xs text-primary hover:underline block mb-3"
+            onClick={translatePost}
+            disabled={isTranslating}
+          >
+            {isTranslating ? "Translating..." : t("post.show_translation")}
+          </button>
         )}
       </div>
       
+      {/* Feed divider above actions */}
+      <div className="border-b border-neutral-200 mt-3 mb-1" />
+      
       {/* Post Actions */}
-      <div className="flex mt-3 pt-3 border-t border-neutral-medium">
+      <div className="flex mt-2 pt-2">
         <button className="flex items-center text-neutral-dark hover:text-primary transition-colors mr-6">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -239,19 +258,21 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
           </svg>
           <span className="text-sm">{post.likeCount}</span>
         </button>
-        <button className="flex items-center text-neutral-dark hover:text-primary transition-colors ml-auto">
+        <div className="flex items-center ml-auto gap-2">
+          <button className="flex items-center text-neutral-dark hover:text-primary transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
           </svg>
         </button>
         <button 
-          className="ml-4 flex items-center text-neutral-dark hover:text-primary transition-colors"
+            className="flex items-center text-neutral-dark hover:text-primary transition-colors"
           onClick={() => savePostMutation.mutate()}
         >
           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill={post.isSaved ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
           </svg>
         </button>
+        </div>
       </div>
     </div>
   );

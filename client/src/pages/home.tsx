@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import MainShell from "@/components/MainShell";
 import SideNav from "@/components/layout/LeftSidebar";
@@ -12,22 +12,55 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Post, User } from "@/types";
 import { Link } from "wouter";
 import EmptyFeed from "@/components/EmptyFeed";
+import { useInView } from "react-intersection-observer";
+import React from "react";
 
 export default function Home() {
   const { t } = useTranslation();
   const [feedType, setFeedType] = useState("for-you");
-  const [page, setPage] = useState(1);
 
   const { data: currentUser, isLoading: isLoadingUser } = useQuery<User | null>({
     queryKey: ["/api/users/me"],
   });
 
-  const { data: posts, isLoading: isLoadingPosts, isFetching } = useQuery<{
-    posts: Post[];
-    totalPages: number;
-  }>({
-    queryKey: [`/api/posts`, { feedType, page }],
+  const {
+    data,
+    isLoading: isLoadingPosts,
+    isFetchingNextPage,
+    fetchNextPage,
+    hasNextPage,
+  } = useInfiniteQuery<{ posts: Post[]; page: number; totalPages: number }, Error>({
+    queryKey: ["/api/posts", feedType],
+    queryFn: async ({ pageParam = 1 }) => {
+      const res = await fetch(`/api/posts?feedType=${feedType}&page=${pageParam}`);
+      if (!res.ok) throw new Error("Failed to fetch posts");
+      return res.json();
+    },
+    getNextPageParam: (lastPage: { page: number; totalPages: number }) => {
+      if (lastPage.page < lastPage.totalPages) {
+        return lastPage.page + 1;
+      }
+      return undefined;
+    },
+    initialPageParam: 1,
   });
+
+  // Intersection Observer for infinite scroll
+  const { ref: loadMoreRef, inView } = useInView({ triggerOnce: false });
+
+  // Fetch next page when inView
+  React.useEffect(() => {
+    if (inView && hasNextPage && !isFetchingNextPage) {
+      fetchNextPage();
+    }
+  }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Debug: log posts array
+  if (data && data.pages) {
+    // Flatten all posts from all pages
+    const allPosts = data.pages.flatMap((page) => (page as { posts: Post[] }).posts);
+    console.log('DEBUG: Posts to render:', allPosts);
+  }
 
   return (
     <MainShell leftNav={<SideNav />} rightAside={<RightSidebar />}>
@@ -52,9 +85,43 @@ export default function Home() {
         <FeedSelector onFeedChange={setFeedType} />
         {/* Feed content */}
         {isLoadingPosts ? (
-          <Skeleton className="h-40 w-full" />
-        ) : posts && posts.posts.length > 0 ? (
-          posts.posts.map((post) => <PostItem key={post.id} post={post} />)
+          Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="bg-neutral-50 rounded-2xl shadow p-4 mb-4">
+              <div className="flex items-center mb-3">
+                <Skeleton className="w-10 h-10 rounded-full mr-3" />
+                <div className="flex-1">
+                  <Skeleton className="h-4 w-1/3 mb-2" />
+                  <Skeleton className="h-3 w-1/4" />
+                </div>
+              </div>
+              <Skeleton className="h-4 w-5/6 mb-2" />
+              <Skeleton className="h-4 w-2/3 mb-2" />
+              <Skeleton className="h-4 w-1/2" />
+            </div>
+          ))
+        ) : data && data.pages && data.pages.flatMap((page) => (page as { posts: Post[] }).posts).length > 0 ? (
+          <>
+            {data.pages.flatMap((page) => (page as { posts: Post[] }).posts).map((post) => (
+              <PostItem key={post.id} post={post} />
+            ))}
+            <div ref={loadMoreRef} />
+            {isFetchingNextPage && (
+              Array.from({ length: 2 }).map((_, i) => (
+                <div key={i} className="bg-neutral-50 rounded-2xl shadow p-4 mb-4">
+                  <div className="flex items-center mb-3">
+                    <Skeleton className="w-10 h-10 rounded-full mr-3" />
+                    <div className="flex-1">
+                      <Skeleton className="h-4 w-1/3 mb-2" />
+                      <Skeleton className="h-3 w-1/4" />
+                    </div>
+                  </div>
+                  <Skeleton className="h-4 w-5/6 mb-2" />
+                  <Skeleton className="h-4 w-2/3 mb-2" />
+                  <Skeleton className="h-4 w-1/2" />
+                </div>
+              ))
+            )}
+          </>
         ) : (
           <EmptyFeed />
         )}

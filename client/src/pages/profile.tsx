@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Post, User } from "@/types";
+import ProfilePictureUpload from '@/components/users/ProfilePictureUpload';
 
 export default function Profile() {
   const { username } = useParams<{ username?: string }>();
@@ -115,10 +116,16 @@ export default function Profile() {
               />
             )}
             {/* Profile Image */}
-            <Avatar className="absolute left-6 -bottom-12 w-24 h-24 border-4 border-white dark:border-dark-bg/40 shadow-lg">
-              <AvatarImage src={profileUser!.profileImage} alt={profileUser!.name} />
-              <AvatarFallback className="text-2xl">{profileUser!.name.charAt(0)}</AvatarFallback>
-            </Avatar>
+            <div className="absolute left-6 -bottom-12">
+              {isOwnProfile ? (
+                <ProfilePictureUpload user={profileUser!} />
+              ) : (
+                <Avatar className="w-24 h-24 border-4 border-white dark:border-dark-bg/40 shadow-lg">
+                  <AvatarImage src={profileUser!.profileImage} alt={profileUser!.name} />
+                  <AvatarFallback className="text-2xl">{profileUser!.name.charAt(0)}</AvatarFallback>
+                </Avatar>
+              )}
+            </div>
             {/* Follow/Edit Button */}
             <div className="absolute right-6 -bottom-10">
               {isOwnProfile ? (

@@ -16,36 +16,46 @@ export default function FeedSelector({ onFeedChange }: FeedSelectorProps) {
 
   return (
     <div className="bg-white rounded-xl shadow-sm p-2">
-      <div className="flex border-b border-neutral-medium">
+      <div className="flex gap-2 mt-1">
         <button 
-          className={`flex-1 py-2 px-3 font-medium ${
+          className={`px-4 py-1 rounded-full font-medium transition shadow-sm focus-visible:outline-primary-500 ${
             activeFeed === "for-you" 
-              ? "text-primary font-semibold border-b-2 border-primary" 
-              : "text-neutral-dark hover:bg-neutral-light rounded-t-lg transition-colors"
+              ? "bg-primary-500 text-white"
+              : "border border-primary-500 text-primary-500 bg-white hover:bg-primary-50"
           }`}
           onClick={() => handleFeedChange("for-you")}
         >
           {t("feed.for_you")}
         </button>
         <button 
-          className={`flex-1 py-2 px-3 font-medium ${
+          className={`px-4 py-1 rounded-full font-medium transition shadow-sm focus-visible:outline-primary-500 ${
             activeFeed === "following" 
-              ? "text-primary font-semibold border-b-2 border-primary" 
-              : "text-neutral-dark hover:bg-neutral-light rounded-t-lg transition-colors"
+              ? "bg-primary-500 text-white"
+              : "border border-primary-500 text-primary-500 bg-white hover:bg-primary-50"
           }`}
           onClick={() => handleFeedChange("following")}
         >
           {t("feed.following")}
         </button>
         <button 
-          className={`flex-1 py-2 px-3 font-medium ${
+          className={`px-4 py-1 rounded-full font-medium transition shadow-sm focus-visible:outline-primary-500 ${
             activeFeed === "circuits" 
-              ? "text-primary font-semibold border-b-2 border-primary" 
-              : "text-neutral-dark hover:bg-neutral-light rounded-t-lg transition-colors"
+              ? "bg-primary-500 text-white"
+              : "border border-primary-500 text-primary-500 bg-white hover:bg-primary-50"
           }`}
           onClick={() => handleFeedChange("circuits")}
         >
           {t("feed.circuits")}
+        </button>
+        <button 
+          className={`px-4 py-1 rounded-full font-medium transition shadow-sm focus-visible:outline-primary-500 ${
+            activeFeed === "discover" 
+              ? "bg-primary-500 text-white"
+              : "border border-primary-500 text-primary-500 bg-white hover:bg-primary-50"
+          }`}
+          onClick={() => handleFeedChange("discover")}
+        >
+          {t("nav.discover")}
         </button>
       </div>
       

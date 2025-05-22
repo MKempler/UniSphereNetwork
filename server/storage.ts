@@ -1,4 +1,4 @@
-import {
+import type {
   User, InsertUser,
   Post, InsertPost,
   Follow, InsertFollow,
@@ -9,14 +9,16 @@ import {
   Community, InsertCommunity,
   CommunityMember, InsertCommunityMember,
   Trend, InsertTrend,
-  Notification, InsertNotification,
+  Notification, InsertNotification
+} from "../shared/schema.ts";
+import {
   users, posts, follows, postInteractions, comments,
-  circuits, circuitSubscriptions, communities,
+  circuits, circuit_subscriptions, communities,
   communityMembers, trends, notifications
-} from "@shared/schema";
-import { db } from "./db";
+} from "../shared/schema.ts";
+import { db } from "./db.ts";
 import { eq, and, sql } from "drizzle-orm";
-import { generateTranslation, detectLanguage } from './translation';
+import { generateTranslation, detectLanguage } from './translation.ts';
 
 export interface IStorage {
   // User operations
@@ -258,22 +260,21 @@ export class DatabaseStorage implements IStorage {
   
   async getSuggestedUsers(currentUserId?: number): Promise<User[]> {
     try {
-      // For now, just return some users the current user is not following
-      const query = db.select().from(users).limit(5);
-      
-      if (currentUserId) {
-        // Get users the current user is not following
-        const followingIds = await this.getFollowedUserIds(currentUserId);
-        if (followingIds.length > 0) {
-          // Also exclude the current user
-          followingIds.push(currentUserId);
-          query.where(sql`${users.id} NOT IN (${followingIds.join(',')})`);
-        } else {
-          query.where(sql`${users.id} != ${currentUserId}`);
-        }
+      if (!currentUserId) {
+        return await db.select().from(users).limit(5);
       }
-      
-      return await query;
+        const followingIds = await this.getFollowedUserIds(currentUserId);
+          followingIds.push(currentUserId);
+      if (followingIds.length > 0) {
+        // Use a fully raw SQL query to avoid drizzle-orm type mismatches
+        const idsList = followingIds.map(id => Number(id)).filter(Boolean).join(',');
+        const sqlStr = `SELECT * FROM users WHERE id NOT IN (${idsList}) LIMIT 5`;
+        // @ts-ignore
+        const result = await db.execute(sqlStr);
+        return result;
+        } else {
+        return await db.select().from(users).where(sql`${users.id} != ${currentUserId}`).limit(5);
+        }
     } catch (error) {
       console.error("Error in getSuggestedUsers:", error);
       return [];
@@ -364,9 +365,9 @@ export class DatabaseStorage implements IStorage {
   async getSubscribedCircuitIds(userId: number): Promise<number[]> {
     try {
       const subscriptions = await db
-        .select({ circuitId: circuitSubscriptions.circuitId })
-        .from(circuitSubscriptions)
-        .where(eq(circuitSubscriptions.userId, userId));
+        .select({ circuitId: circuit_subscriptions.circuitId })
+        .from(circuit_subscriptions)
+        .where(eq(circuit_subscriptions.userId, userId));
       
       return subscriptions.map(s => s.circuitId);
     } catch (error) {
@@ -556,7 +557,6 @@ export class DatabaseStorage implements IStorage {
         .insert(circuits)
         .values({
           ...insertCircuit,
-          color: insertCircuit.color || null,
           createdAt: new Date()
         })
         .returning();
@@ -570,11 +570,11 @@ export class DatabaseStorage implements IStorage {
   async subscribeToCircuit(userId: number, circuitId: number): Promise<CircuitSubscription> {
     try {
       const [subscription] = await db
-        .insert(circuitSubscriptions)
+        .insert(circuit_subscriptions)
         .values({
           userId,
           circuitId,
-          createdAt: new Date()
+          subscribedAt: new Date()
         })
         .returning();
       return subscription;
@@ -587,11 +587,11 @@ export class DatabaseStorage implements IStorage {
   async unsubscribeFromCircuit(userId: number, circuitId: number): Promise<void> {
     try {
       await db
-        .delete(circuitSubscriptions)
+        .delete(circuit_subscriptions)
         .where(
           and(
-            eq(circuitSubscriptions.userId, userId),
-            eq(circuitSubscriptions.circuitId, circuitId)
+            eq(circuit_subscriptions.userId, userId),
+            eq(circuit_subscriptions.circuitId, circuitId)
           )
         );
     } catch (error) {
@@ -604,11 +604,11 @@ export class DatabaseStorage implements IStorage {
     try {
       const [subscription] = await db
         .select()
-        .from(circuitSubscriptions)
+        .from(circuit_subscriptions)
         .where(
           and(
-            eq(circuitSubscriptions.userId, userId),
-            eq(circuitSubscriptions.circuitId, circuitId)
+            eq(circuit_subscriptions.userId, userId),
+            eq(circuit_subscriptions.circuitId, circuitId)
           )
         );
       return !!subscription;
@@ -622,8 +622,8 @@ export class DatabaseStorage implements IStorage {
     try {
       const result = await db
         .select({ count: sql`count(*)` })
-        .from(circuitSubscriptions)
-        .where(eq(circuitSubscriptions.circuitId, circuitId));
+        .from(circuit_subscriptions)
+        .where(eq(circuit_subscriptions.circuitId, circuitId));
       return Number(result[0]?.count || 0);
     } catch (error) {
       console.error("Error in getCircuitSubscriberCount:", error);

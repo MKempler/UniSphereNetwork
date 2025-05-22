@@ -105,3 +105,39 @@ export const queryClient = new QueryClient({
     },
   },
 });
+
+// --- Social Circuits API ---
+export async function createCircuit(data: { name: string; description?: string }) {
+  const res = await apiRequest("POST", "/api/circuits", data);
+  return res.json();
+}
+
+export async function listCircuits(page = 1, limit = 10) {
+  const res = await apiRequest("GET", `/api/circuits?page=${page}&limit=${limit}`);
+  return res.json();
+}
+
+export async function getCircuitDetails(id: number, page = 1, limit = 10) {
+  const res = await apiRequest("GET", `/api/circuits/${id}?page=${page}&limit=${limit}`);
+  return res.json();
+}
+
+export async function subscribeToCircuit(id: number) {
+  const res = await apiRequest("POST", `/api/circuits/${id}/subscribe`);
+  return res.json();
+}
+
+export async function unsubscribeFromCircuit(id: number) {
+  const res = await apiRequest("DELETE", `/api/circuits/${id}/subscribe`);
+  return res;
+}
+
+export async function addPostToCircuit(circuitId: number, postId: number) {
+  const res = await apiRequest("POST", `/api/circuits/${circuitId}/posts`, { postId });
+  return res.json();
+}
+
+export async function removePostFromCircuit(circuitId: number, postId: number) {
+  const res = await apiRequest("DELETE", `/api/circuits/${circuitId}/posts/${postId}`);
+  return res;
+}

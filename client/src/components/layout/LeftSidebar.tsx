@@ -32,11 +32,9 @@ const SideNav = () => {
         <ul className="space-y-1 mb-6">
           {navItems.filter(i => i.section === "main").map(({ label, icon: Icon, href }) => (
             <li key={href}>
-              <Link href={href}>
-                <a className={`flex items-center px-4 py-2 rounded-lg transition-colors focus-visible:outline-primary-500 ${location === href ? "bg-primary-500/10 text-primary-600" : "text-neutral-700 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-dark-bg/40"}`} aria-label={t(label)}>
-                  <Icon className="w-5 h-5 mr-3" />
+              <Link href={href} className={`group flex items-center px-4 py-2 rounded-lg transition-colors focus-visible:outline-primary-500 ${location === href ? "bg-primary-500/10 text-primary-600" : "text-neutral-700 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-dark-bg/40"}`} aria-label={t(label)}>
+                <Icon className={`w-5 h-5 mr-3 transition-colors ${location === href ? "text-primary-500" : "group-hover:text-primary-600 group-active:text-primary-600"}`} />
                   <span>{t(label)}</span>
-                </a>
               </Link>
             </li>
           ))}
@@ -45,11 +43,9 @@ const SideNav = () => {
         <ul className="space-y-1 mb-6">
           {navItems.filter(i => i.section === "discover").map(({ label, icon: Icon, href }) => (
             <li key={href}>
-              <Link href={href}>
-                <a className={`flex items-center px-4 py-2 rounded-lg transition-colors focus-visible:outline-primary-500 ${location === href ? "bg-primary-500/10 text-primary-600" : "text-neutral-700 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-dark-bg/40"}`} aria-label={t(label)}>
-                  <Icon className="w-5 h-5 mr-3" />
+              <Link href={href} className={`group flex items-center px-4 py-2 rounded-lg transition-colors focus-visible:outline-primary-500 ${location === href ? "bg-primary-500/10 text-primary-600" : "text-neutral-700 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-dark-bg/40"}`} aria-label={t(label)}>
+                <Icon className={`w-5 h-5 mr-3 transition-colors ${location === href ? "text-primary-500" : "group-hover:text-primary-600 group-active:text-primary-600"}`} />
                   <span>{t(label)}</span>
-                </a>
               </Link>
             </li>
           ))}
@@ -58,18 +54,15 @@ const SideNav = () => {
       <div className="space-y-1 px-4">
         <ThemeToggle />
         {bottomItems.map(({ label, icon: Icon, href }) => (
-          <Link key={href} href={href}>
-            <a className="flex items-center py-2 rounded-lg text-neutral-600 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-dark-bg/40 transition-colors focus-visible:outline-primary-500" aria-label={t(label)}>
-              <Icon className="w-5 h-5 mr-3" />
+          <Link key={href} href={href} className="group flex items-center py-2 rounded-lg text-neutral-600 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-dark-bg/40 transition-colors focus-visible:outline-primary-500" aria-label={t(label)}>
+            <Icon className="w-5 h-5 mr-3 group-hover:text-primary-600 group-active:text-primary-600 transition-colors" />
               <span>{t(label)}</span>
-            </a>
           </Link>
         ))}
         <div className="mt-6 pt-4 border-t border-neutral-200 dark:border-dark-bg/40">
           {isAuthenticated && user ? (
             <div className="flex items-center gap-3">
-              <Link href={`/profile/${user.username}`}>
-                <a className="flex items-center group">
+              <Link href={`/profile/${user.username}`} className="flex items-center group">
                   <Avatar className="h-10 w-10 mr-2">
                     <AvatarImage src={user.profileImage} alt={user.name} />
                     <AvatarFallback>{user.name?.charAt(0)}</AvatarFallback>
@@ -78,7 +71,6 @@ const SideNav = () => {
                     <span className="font-semibold text-neutral-800 dark:text-neutral-100 group-hover:text-primary-500 transition-colors">{user.name}</span>
                     <span className="text-xs text-neutral-500 dark:text-neutral-300">@{user.username}</span>
                   </div>
-                </a>
               </Link>
               <button
                 onClick={logout}
@@ -90,12 +82,8 @@ const SideNav = () => {
             </div>
           ) : (
             <div className="flex flex-col gap-2">
-              <Link href="/login">
-                <a className="w-full text-center rounded bg-primary-500 text-white py-2 font-medium hover:bg-primary-600 transition-colors">{t("auth.login")}</a>
-              </Link>
-              <Link href="/register">
-                <a className="w-full text-center rounded border border-primary-500 text-primary-500 py-2 font-medium hover:bg-primary-500 hover:text-white transition-colors">{t("auth.register")}</a>
-              </Link>
+              <Link href="/login" className="w-full text-center rounded bg-primary-500 text-white py-2 font-medium hover:bg-primary-600 transition-colors">{t("auth.login")}</Link>
+              <Link href="/register" className="w-full text-center rounded border border-primary-500 text-primary-500 py-2 font-medium hover:bg-primary-500 hover:text-white transition-colors">{t("auth.register")}</Link>
             </div>
           )}
         </div>
