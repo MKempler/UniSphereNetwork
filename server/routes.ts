@@ -156,7 +156,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Authentication Routes
   app.post("/api/auth/register", async (req, res) => {
-    const { name, username, email, password, did, publicKey, homeNode } = req.body;
+    const { name, username, email, password, did, publicKey, homeNode, language } = req.body;
 
     console.log('[/api/auth/register] Received request:');
     console.log('Headers:', JSON.stringify(req.headers, null, 2));
@@ -262,7 +262,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         password: hashedPassword,
         did,
         publicKey: JSON.stringify(parsedPublicKey),
-        homeNode
+        homeNode,
+        language
       });
 
       if (!newUser) {
@@ -1150,6 +1151,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await db.delete(circuit_posts).where(and(eq(circuit_posts.circuitId, circuitId), eq(circuit_posts.postId, postId)));
       res.status(204).end();
     } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Users
+  app.get("/api/users/:username", async (req, res) => {
+    try {
+      const { username } = req.params;
+      const user = await storage.getUserByUsername(username);
+      
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      res.status(200).json(await formatUser(user));
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+  
+  // Update user settings
+  app.patch("/api/users/settings", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.session.userId;
+      const { language } = req.body;
+      
+      // Validate input
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+      
+      // Update user settings
+      const updatedUser = await storage.updateUser(userId, { 
+        language: language || undefined
+      });
+      
+      if (!updatedUser) {
+        return res.status(404).json({ message: "User not found" });
+      }
+      
+      res.status(200).json({
+        message: "Settings updated successfully",
+        user: await formatUser(updatedUser)
+      });
+    } catch (error) {
+      console.error("Error updating user settings:", error);
       handleError(error, res);
     }
   });

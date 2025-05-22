@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { apiRequest } from '@/lib/queryClient';
+import { useAuth } from '../hooks/simpleAuth.js';
 
 type LanguageCode = string; // e.g. 'en', 'es', 'fr', etc.
 
@@ -25,15 +26,49 @@ interface TranslationContextType {
 const TranslationContext = createContext<TranslationContextType | undefined>(undefined);
 
 export function TranslationProvider({ children }: { children: ReactNode }) {
-  // Default to browser language or English
-  const [userLanguage, setUserLanguage] = useState<LanguageCode>(
-    () => navigator.language.split('-')[0] || 'en'
-  );
+  const { user, isAuthenticated } = useAuth();
   
-  const [isAutoTranslateEnabled, setIsAutoTranslateEnabled] = useState(true);
+  // Default to stored preference, then browser language, then English
+  const [userLanguage, setUserLanguageState] = useState<LanguageCode>(() => {
+    // First try to get from localStorage
+    const storedLanguage = localStorage.getItem('userLanguage');
+    if (storedLanguage) {
+      return storedLanguage;
+    }
+    
+    // Next, try browser language
+    return navigator.language.split('-')[0] || 'en';
+  });
+  
+  // Auto-translate settings also persisted
+  const [isAutoTranslateEnabled, setIsAutoTranslateEnabled] = useState(() => {
+    const storedPreference = localStorage.getItem('autoTranslate');
+    return storedPreference === null ? true : storedPreference === 'true';
+  });
   
   // Cache to store already translated text
   const [translationCache, setTranslationCache] = useState<Record<string, Record<string, string>>>({});
+
+  // Load user language preference from profile when authenticated
+  useEffect(() => {
+    if (isAuthenticated && user?.language && user.language !== userLanguage) {
+      setUserLanguageState(user.language);
+    }
+  }, [isAuthenticated, user?.language]);
+
+  // Update language preference
+  const setUserLanguage = useCallback((lang: LanguageCode) => {
+    setUserLanguageState(lang);
+    
+    // Save to localStorage
+    localStorage.setItem('userLanguage', lang);
+    
+    // If authenticated, update user profile
+    if (isAuthenticated) {
+      apiRequest('PATCH', '/api/users/settings', { language: lang })
+        .catch(error => console.error('Failed to update language preference:', error));
+    }
+  }, [isAuthenticated]);
 
   // Detect language of text
   const detectLanguage = useCallback(async (text: string): Promise<LanguageCode> => {
@@ -87,7 +122,12 @@ export function TranslationProvider({ children }: { children: ReactNode }) {
   }, [userLanguage, translationCache]);
 
   const toggleAutoTranslate = useCallback(() => {
-    setIsAutoTranslateEnabled(prev => !prev);
+    setIsAutoTranslateEnabled(prev => {
+      const newValue = !prev;
+      // Persist auto-translate preference
+      localStorage.setItem('autoTranslate', String(newValue));
+      return newValue;
+    });
   }, []);
 
   const value = {
