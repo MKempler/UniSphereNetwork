@@ -578,13 +578,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Post Routes
-  app.get("/api/posts", async (req, res) => {
+  app.get("/api/posts", authMiddleware, async (req, res) => {
     try {
       const feedType = req.query.feedType as string || "for-you";
       const page = parseInt(req.query.page as string || "1");
       const limit = 10;
-      const currentUserId = req.headers.authorization ? 
-        req.session?.userId : undefined;
+      const currentUserId = req.body.currentUserId;
       
       let posts: any[] = [];
       if (feedType === "following" && currentUserId) {

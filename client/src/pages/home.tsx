@@ -14,6 +14,7 @@ import { Link } from "wouter";
 import EmptyFeed from "@/components/EmptyFeed";
 import { useInView } from "react-intersection-observer";
 import React from "react";
+import { apiRequest } from "@/lib/queryClient";
 
 export default function Home() {
   const { t } = useTranslation();
@@ -32,8 +33,8 @@ export default function Home() {
   } = useInfiniteQuery<{ posts: Post[]; page: number; totalPages: number }, Error>({
     queryKey: ["/api/posts", feedType],
     queryFn: async ({ pageParam = 1 }) => {
-      const res = await fetch(`/api/posts?feedType=${feedType}&page=${pageParam}`);
-      if (!res.ok) throw new Error("Failed to fetch posts");
+      const url = `/api/posts?feedType=${feedType}&page=${pageParam}`;
+      const res = await apiRequest("GET", url);
       return res.json();
     },
     getNextPageParam: (lastPage: { page: number; totalPages: number }) => {

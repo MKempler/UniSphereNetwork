@@ -932,7 +932,7 @@ export class DatabaseStorage implements IStorage {
       return await db
         .select()
         .from(posts)
-        .where(sql`${posts.userId} IN (${userIds.join(',')})`)
+        .where(inArray(posts.userId, userIds))
         .orderBy(sql`${posts.createdAt} DESC`)
         .limit(limit)
         .offset(offset);
