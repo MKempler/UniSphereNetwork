@@ -17,7 +17,7 @@ import {
   communityMembers, trends, notifications
 } from "../shared/schema.ts";
 import { db } from "./db.ts";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, sql, inArray } from "drizzle-orm";
 import { translateText, detectLanguage } from './translation.ts';
 
 export interface IStorage {
@@ -88,6 +88,11 @@ export interface IStorage {
 
   // New method
   getPostsByUserIds(userIds: number[], page?: number, limit?: number): Promise<Post[]>;
+
+  // New functions
+  getUserFollowers(userId: number): Promise<User[]>;
+  getUserFollowing(userId: number): Promise<User[]>;
+  getMutualFollowers(userId: number, otherUserId: number): Promise<User[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -260,21 +265,73 @@ export class DatabaseStorage implements IStorage {
   
   async getSuggestedUsers(currentUserId?: number): Promise<User[]> {
     try {
+      // If no current user, return some random users
       if (!currentUserId) {
         return await db.select().from(users).limit(5);
       }
-        const followingIds = await this.getFollowedUserIds(currentUserId);
-          followingIds.push(currentUserId);
-      if (followingIds.length > 0) {
-        // Use a fully raw SQL query to avoid drizzle-orm type mismatches
-        const idsList = followingIds.map(id => Number(id)).filter(Boolean).join(',');
-        const sqlStr = `SELECT * FROM users WHERE id NOT IN (${idsList}) LIMIT 5`;
+      
+      // Get users that the current user is already following
+      const followingIds = await this.getFollowedUserIds(currentUserId);
+      followingIds.push(currentUserId); // Add current user to exclude them
+      
+      // For more personalized suggestions, let's look for users that are followed
+      // by people the current user follows (mutual connections)
+      
+      // First, check if we have enough following to make this approach worthwhile
+      if (followingIds.length > 1) { // More than just the current user
+        // Get all the users that are followed by the people the current user follows
+        // This is a common social network recommendation approach
+        const mutualConnectionsQuery = `
+          SELECT f2.following_id, COUNT(f2.following_id) as mutual_count
+          FROM follows f1
+          JOIN follows f2 ON f1.following_id = f2.follower_id
+          WHERE f1.follower_id = ${currentUserId}
+            AND f2.following_id NOT IN (${followingIds.join(',')})
+          GROUP BY f2.following_id
+          ORDER BY mutual_count DESC
+          LIMIT 5
+        `;
+        
         // @ts-ignore
-        const result = await db.execute(sqlStr);
-        return result;
-        } else {
-        return await db.select().from(users).where(sql`${users.id} != ${currentUserId}`).limit(5);
+        const mutualConnections = await db.execute(mutualConnectionsQuery);
+        
+        // If we have mutual connections to suggest
+        if (mutualConnections && mutualConnections.length > 0) {
+          // Get the full user details for these recommended users
+          const recommendedIds = mutualConnections.map((row: any) => row.following_id);
+          
+          if (recommendedIds.length > 0) {
+            // Fetch the full user records
+            const suggestedUsersQuery = `
+              SELECT * FROM users 
+              WHERE id IN (${recommendedIds.join(',')})
+            `;
+            // @ts-ignore
+            const suggestedUsers = await db.execute(suggestedUsersQuery);
+            
+            if (suggestedUsers && suggestedUsers.length > 0) {
+              return suggestedUsers;
+            }
+          }
         }
+      }
+      
+      // Fallback: If we couldn't find mutual connections or don't have enough following,
+      // return users that the current user is not following
+      const excludeIds = followingIds.length > 0 ? 
+        followingIds.map(id => Number(id)).filter(Boolean).join(',') : 
+        currentUserId.toString();
+        
+      const fallbackQuery = `
+        SELECT * FROM users 
+        WHERE id NOT IN (${excludeIds})
+        ORDER BY RANDOM()
+        LIMIT 5
+      `;
+      
+      // @ts-ignore
+      const result = await db.execute(fallbackQuery);
+      return result;
     } catch (error) {
       console.error("Error in getSuggestedUsers:", error);
       return [];
@@ -881,6 +938,94 @@ export class DatabaseStorage implements IStorage {
         .offset(offset);
     } catch (error) {
       console.error("Error in getPostsByUserIds:", error);
+      return [];
+    }
+  }
+
+  async getUserFollowers(userId: number): Promise<User[]> {
+    try {
+      const followerRows = await db
+        .select({ followerId: follows.followerId })
+        .from(follows)
+        .where(eq(follows.followingId, userId));
+      
+      const followerIds = followerRows.map(row => row.followerId);
+      
+      if (followerIds.length === 0) return [];
+      
+      const followers = await db
+        .select()
+        .from(users)
+        .where(inArray(users.id, followerIds));
+      
+      return followers;
+    } catch (error) {
+      console.error("Error in getUserFollowers:", error);
+      return [];
+    }
+  }
+
+  async getUserFollowing(userId: number): Promise<User[]> {
+    try {
+      const followingRows = await db
+        .select({ followingId: follows.followingId })
+        .from(follows)
+        .where(eq(follows.followerId, userId));
+      
+      const followingIds = followingRows.map(row => row.followingId);
+      
+      if (followingIds.length === 0) return [];
+      
+      const following = await db
+        .select()
+        .from(users)
+        .where(inArray(users.id, followingIds));
+      
+      return following;
+    } catch (error) {
+      console.error("Error in getUserFollowing:", error);
+      return [];
+    }
+  }
+  
+  async getMutualFollowers(userId: number, otherUserId: number): Promise<User[]> {
+    try {
+      // Find user IDs who follow both users
+      const query = `
+        SELECT f1.follower_id
+        FROM follows f1
+        JOIN follows f2 ON f1.follower_id = f2.follower_id
+        WHERE f1.following_id = ${userId}
+          AND f2.following_id = ${otherUserId}
+          AND f1.follower_id != ${userId}
+          AND f1.follower_id != ${otherUserId}
+      `;
+      
+      // @ts-ignore
+      const mutualFollowerRows = await db.execute(query);
+      
+      if (!mutualFollowerRows || mutualFollowerRows.length === 0) {
+        return [];
+      }
+      
+      const mutualFollowerIds = mutualFollowerRows.map((row: any) => row.follower_id);
+      
+      if (mutualFollowerIds.length === 0) {
+        return [];
+      }
+      
+      // Get the full user details for these mutual followers
+      const usersQuery = `
+        SELECT * FROM users 
+        WHERE id IN (${mutualFollowerIds.join(',')})
+      `;
+      
+      // @ts-ignore
+      const mutualFollowers = await db.execute(usersQuery);
+      
+      return mutualFollowers || [];
+    } catch (error) {
+      console.error("Error in getMutualFollowers:", error);
       return [];
     }
   }

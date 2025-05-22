@@ -6,6 +6,8 @@ import Home from "@/pages/home";
 import Login from "@/pages/auth/login";
 import Register from "@/pages/auth/register";
 import Profile from "@/pages/profile";
+import Followers from "@/pages/followers";
+import Following from "@/pages/following";
 import Debug from "@/pages/debug";
 import CircuitsIndexPage from "@/pages/circuits/index";
 import CircuitDetailPage from "@/pages/circuits/[id]";
@@ -20,6 +22,8 @@ function Router() {
       <Route path="/login" component={Login} />
       <Route path="/register" component={Register} />
       <Route path="/profile/:username?" component={Profile} />
+      <Route path="/followers/:username" component={Followers} />
+      <Route path="/following/:username" component={Following} />
       <Route path="/circuits" component={CircuitsIndexPage} />
       <Route path="/circuits/create" component={CircuitCreatePage} />
       <Route path="/circuits/:id" component={CircuitDetailPage} />

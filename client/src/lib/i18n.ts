@@ -96,7 +96,16 @@ i18n
           // Suggested
           "suggested.title": "Suggested Users",
           "suggested.empty": "No suggestions available.",
-          "suggested.showMore": "Show more suggestions"
+          "suggested.showMore": "Show more suggestions",
+          
+          // Profile
+          "profile.mutual_followers": "Followers you may know",
+          "profile.view_more_mutual": "See {{count}} more",
+          "profile.edit": "Edit Profile",
+          "profile.follow": "Follow",
+          "profile.following": "Following",
+          "profile.unfollow": "Unfollow",
+          "user.follow": "Follow"
         }
       }
     }

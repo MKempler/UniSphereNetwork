@@ -15,6 +15,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Post, User } from "@/types";
 import ProfilePictureUpload from '@/components/users/ProfilePictureUpload';
 import EditProfileModal from '@/components/users/EditProfileModal';
+import MutualFollowers from '@/components/users/MutualFollowers';
 import { LuGlobe } from "react-icons/lu";
 import { LANGUAGE_NAMES } from '@/lib/translation';
 
@@ -43,15 +44,36 @@ export default function Profile() {
   const followMutation = useMutation({
     mutationFn: async () => {
       if (!profileUser) return;
-      return apiRequest("POST", `/api/users/${profileUser.id}/follow`);
+      return apiRequest("POST", `/api/users/${profileUser.id}/follow`, { currentUserId: currentUser?.id });
     },
-    onSuccess: () => {
+    onSuccess: (data, variables, context) => {
+      let newIsFollowingStateForToast: boolean | undefined;
+
+      // Optimistically update the profile data in the cache
+      queryClient.setQueryData([`/api/users/profile/${username}`], (oldData: User | undefined) => {
+        if (oldData) {
+          const updatedIsFollowing = !oldData.isFollowing;
+          newIsFollowingStateForToast = updatedIsFollowing; // Capture the new state for the toast
+          return {
+            ...oldData,
+            isFollowing: updatedIsFollowing, // Toggle the isFollowing state
+            followers: oldData.isFollowing ? oldData.followers - 1 : oldData.followers + 1, // Adjust follower count
+          };
+        }
+        return oldData;
+      });
+
+      // Invalidate queries to ensure data consistency with the server eventually
       queryClient.invalidateQueries({ queryKey: [`/api/users/profile/${username}`] });
       queryClient.invalidateQueries({ queryKey: ["/api/users/me"] });
-      toast({
-        title: profileUser!.isFollowing ? "Unfollowed" : "Following",
-        description: profileUser!.isFollowing ? `You unfollowed @${profileUser!.username}` : `You're now following @${profileUser!.username}`,
-      });
+      
+      // Display toast based on the new state captured from the optimistic update
+      if (newIsFollowingStateForToast !== undefined && profileUser) {
+        toast({
+          title: newIsFollowingStateForToast ? "Following" : "Unfollowed",
+          description: newIsFollowingStateForToast ? `You're now following @${profileUser.username}` : `You unfollowed @${profileUser.username}`,
+        });
+      }
     },
     onError: (error) => {
       toast({
@@ -148,7 +170,7 @@ export default function Profile() {
                   onClick={() => followMutation.mutate()}
                   className={profileUser!.isFollowing ? "bg-white/90 dark:bg-dark-bg/90 backdrop-blur-sm" : ""}
                 >
-                  {profileUser!.isFollowing ? "Unfollow" : "Follow"}
+                  {profileUser!.isFollowing ? "Following" : "Follow"}
                 </Button>
               )}
             </div>
@@ -179,17 +201,29 @@ export default function Profile() {
             )}
             
             <div className="flex mt-3 gap-6">
-              <div>
+              <div 
+                onClick={() => navigate(`/following/${profileUser!.username}`)} 
+                className="cursor-pointer hover:underline"
+              >
                 <span className="font-bold">{profileUser!.following}</span>{" "}
                 <span className="text-neutral-600 dark:text-neutral-300">Following</span>
               </div>
-              <div>
+              <div 
+                onClick={() => navigate(`/followers/${profileUser!.username}`)}
+                className="cursor-pointer hover:underline"
+              >
                 <span className="font-bold">{profileUser!.followers}</span>{" "}
                 <span className="text-neutral-600 dark:text-neutral-300">Followers</span>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Mutual Followers (only shown when viewing another user's profile) */}
+        {!isOwnProfile && currentUser && (
+          <MutualFollowers userId={profileUser!.id} username={profileUser!.username} />
+        )}
+        
         {/* Profile Tabs */}
         <div className="rounded-xl border bg-white dark:bg-dark-bg/40 shadow-sm">
           <Tabs defaultValue="posts" onValueChange={setActiveTab} className="w-full">

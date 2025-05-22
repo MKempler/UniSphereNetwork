@@ -17,7 +17,8 @@ export default function SuggestedUsers({ users }: SuggestedUsersProps) {
 
   const followMutation = useMutation({
     mutationFn: async (userId: number) => {
-      return apiRequest("POST", `/api/users/${userId}/follow`, {});
+      const currentUser = queryClient.getQueryData<User>(["/api/users/me"]);
+      return apiRequest("POST", `/api/users/${userId}/follow`, { currentUserId: currentUser?.id });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users/suggested"] });

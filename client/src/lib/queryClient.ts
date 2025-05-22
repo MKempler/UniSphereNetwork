@@ -72,8 +72,11 @@ export const getQueryFn: <T>(options: {
     console.log(`Response from ${url}: status ${res.status}`);
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
-      console.log(`Auth failed for ${url}, clearing sessionId`);
-      localStorage.removeItem('sessionId');
+      console.log(`Auth failed for ${url}`);
+      if (url.includes("/api/users/me")) {
+        console.log("Clearing sessionId due to 401 on /api/users/me");
+        localStorage.removeItem('sessionId');
+      }
       return null;
     }
 
@@ -85,7 +88,10 @@ export const getQueryFn: <T>(options: {
     } catch (error) {
       console.error(`Error from ${url}:`, error);
       if (res.status === 401) {
-        localStorage.removeItem('sessionId');
+        if (url.includes("/api/users/me")) {
+          console.log("Clearing sessionId due to 401 on /api/users/me in catch block");
+          localStorage.removeItem('sessionId');
+        }
       }
       throw error;
     }
