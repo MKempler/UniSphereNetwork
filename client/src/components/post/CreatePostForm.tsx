@@ -7,7 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 import { detectLanguage } from "@/lib/translation";
 import { User } from "@/types";
 import { CircuitListItem } from "@/types/circuit";
-import { Check, ChevronDown, Image, LucideGlobe, MessageSquarePlus, SmilePlus } from "lucide-react";
+import { Check, ChevronDown, Image, LucideGlobe, MessageSquarePlus, SmilePlus, X, Upload } from "lucide-react";
 import { 
   Popover, 
   PopoverContent, 
@@ -15,10 +15,17 @@ import {
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import EmojiPicker from 'emoji-picker-react';
 
 interface CreatePostFormProps {
   user: User;
   defaultCircuitId?: number;
+}
+
+interface AttachedImage {
+  file: File;
+  preview: string;
+  id: string;
 }
 
 export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFormProps) {
@@ -30,7 +37,14 @@ export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFor
   const [selectedLanguage, setSelectedLanguage] = useState("en");
   const [selectedCircuit, setSelectedCircuit] = useState<CircuitListItem | null>(null);
   const [circuitPopoverOpen, setCircuitPopoverOpen] = useState(false);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+  const [attachedImages, setAttachedImages] = useState<AttachedImage[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const MAX_IMAGES = 4;
+  const MAX_CHARACTERS = 280;
 
   // Fetch user's subscribed circuits
   const { data: circuits } = useQuery<CircuitListItem[]>({
@@ -75,12 +89,138 @@ export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFor
     }
   };
 
+  // Handle file processing (shared between file input and drag & drop)
+  const processFiles = (files: File[]) => {
+    files.forEach(file => {
+      if (attachedImages.length >= MAX_IMAGES) {
+        toast({
+          title: "Too many images",
+          description: `You can only attach up to ${MAX_IMAGES} images per post.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (!file.type.startsWith('image/')) {
+        toast({
+          title: "Invalid file type",
+          description: "Only image files are allowed.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        toast({
+          title: "File too large",
+          description: "Images must be smaller than 10MB.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const newImage: AttachedImage = {
+          file,
+          preview: reader.result as string,
+          id: Math.random().toString(36).substr(2, 9)
+        };
+        setAttachedImages(prev => [...prev, newImage]);
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Handle file selection
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    processFiles(files);
+
+    // Reset file input
+    if (e.target) {
+      e.target.value = '';
+    }
+  };
+
+  // Handle drag and drop
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    
+    const files = Array.from(e.dataTransfer.files);
+    processFiles(files);
+  };
+
+  // Remove attached image
+  const removeImage = (imageId: string) => {
+    setAttachedImages(prev => prev.filter(img => img.id !== imageId));
+  };
+
+  // Handle emoji selection
+  const handleEmojiSelect = (emojiData: any) => {
+    const emoji = emojiData.emoji;
+    if (textareaRef.current) {
+      const start = textareaRef.current.selectionStart;
+      const end = textareaRef.current.selectionEnd;
+      const newContent = content.slice(0, start) + emoji + content.slice(end);
+      setContent(newContent);
+      
+      // Reset cursor position
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.selectionStart = textareaRef.current.selectionEnd = start + emoji.length;
+          textareaRef.current.focus();
+        }
+      }, 0);
+    }
+    setEmojiPickerOpen(false);
+  };
+
+  // Upload images to server
+  const uploadImages = async (images: AttachedImage[]): Promise<string[]> => {
+    const uploadPromises = images.map(async (image) => {
+      const formData = new FormData();
+      formData.append('image', image.file);
+      
+      try {
+        const response = await fetch('http://localhost:5000/api/upload/image', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          throw new Error('Upload failed');
+        }
+        
+        const data = await response.json();
+        return `http://localhost:5000${data.url}`;
+      } catch (error) {
+        console.error('Image upload failed:', error);
+        throw error;
+      }
+    });
+
+    return Promise.all(uploadPromises);
+  };
+
   const createPostMutation = useMutation({
-    mutationFn: async (newPost: { content: string; language: string; circuitId?: number }) => {
+    mutationFn: async (newPost: { content: string; language: string; circuitId?: number; media?: string[] }) => {
       return apiRequest("POST", "/api/posts", newPost);
     },
     onSuccess: async (post) => {
       setContent("");
+      setAttachedImages([]);
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';
       }
@@ -113,18 +253,54 @@ export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFor
   });
 
   const handleSubmit = async () => {
-    if (!content.trim()) return;
+    if (!content.trim() && attachedImages.length === 0) return;
     
     setIsSubmitting(true);
+    
+    try {
+      let mediaUrls: string[] = [];
+      
+      if (attachedImages.length > 0) {
+        mediaUrls = await uploadImages(attachedImages);
+      }
+      
     createPostMutation.mutate({
       content: content.trim(),
       language: selectedLanguage,
-      circuitId: selectedCircuit?.id
+        circuitId: selectedCircuit?.id,
+        media: mediaUrls.length > 0 ? mediaUrls : undefined
+      });
+    } catch (error) {
+      setIsSubmitting(false);
+      toast({
+        title: "Error",
+        description: "Failed to upload images. Please try again.",
+        variant: "destructive",
     });
+    }
   };
 
+  const remainingChars = MAX_CHARACTERS - content.length;
+  const isOverLimit = remainingChars < 0;
+  const canPost = (content.trim() || attachedImages.length > 0) && !isOverLimit && !isSubmitting;
+
   return (
-    <div className="relative bg-white dark:bg-neutral-50 border border-neutral-200 shadow rounded-2xl p-4 mb-6">
+    <div 
+      className={`relative bg-white dark:bg-neutral-50 border border-neutral-200 shadow rounded-2xl p-4 mb-6 transition-colors ${
+        isDragOver ? 'border-primary-500 bg-primary-50' : ''
+      }`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {isDragOver && (
+        <div className="absolute inset-0 bg-primary-100/80 border-2 border-dashed border-primary-500 rounded-2xl flex items-center justify-center z-10">
+          <div className="text-center">
+            <Upload className="mx-auto h-8 w-8 text-primary-600 mb-2" />
+            <p className="text-primary-700 font-medium">Drop images here to upload</p>
+          </div>
+        </div>
+      )}
       <div className="flex">
         <Avatar className="w-12 h-12 mr-4">
           <AvatarImage src={user.profileImage} alt={user.name} />
@@ -141,37 +317,96 @@ export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFor
             value={content}
             onChange={handleTextareaChange}
             disabled={isSubmitting}
+            maxLength={MAX_CHARACTERS + 100} // Allow typing beyond limit for warning
           />
+          
+          {/* Character counter */}
+          {content.length > 0 && (
+            <div className="px-3 pb-2 text-right">
+              <span className={`text-xs ${isOverLimit ? 'text-red-500 font-semibold' : remainingChars <= 20 ? 'text-yellow-600' : 'text-neutral-400'}`}>
+                {remainingChars}
+              </span>
+            </div>
+          )}
+          
+          {/* Image previews */}
+          {attachedImages.length > 0 && (
+            <div className="mx-3 mb-3">
+              <div className={`grid gap-2 ${attachedImages.length === 1 ? 'grid-cols-1' : attachedImages.length === 2 ? 'grid-cols-2' : 'grid-cols-2'}`}>
+                {attachedImages.map((image) => (
+                  <div key={image.id} className="relative group">
+                    <img 
+                      src={image.preview} 
+                      alt="Preview"
+                      className="w-full h-32 object-cover rounded-lg border border-neutral-200"
+                    />
+                    <button
+                      onClick={() => removeImage(image.id)}
+                      className="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      disabled={isSubmitting}
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           
           {/* Post actions bar */}
           <div className="flex items-center justify-between mt-3">
             <div className="flex items-center space-x-2">
+              {/* Image upload */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleFileSelect}
+                className="hidden"
+              />
               <button 
-              className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
-                title="Add media"
-                disabled={isSubmitting}
+                onClick={() => fileInputRef.current?.click()}
+                className="text-primary p-2 rounded-full hover:bg-neutral-100 transition-colors focus-visible:outline-primary-500" 
+                title="Add images"
+                disabled={isSubmitting || attachedImages.length >= MAX_IMAGES}
               >
                 <Image className="h-5 w-5" />
               </button>
+              
+              {/* Emoji picker */}
+              <Popover open={emojiPickerOpen} onOpenChange={setEmojiPickerOpen}>
+                <PopoverTrigger asChild>
+                  <button 
+                    className="text-primary p-2 rounded-full hover:bg-neutral-100 transition-colors focus-visible:outline-primary-500" 
+                    title="Add emoji"
+                    disabled={isSubmitting}
+                  >
+                    <SmilePlus className="h-5 w-5" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <EmojiPicker
+                    onEmojiClick={handleEmojiSelect}
+                    width={320}
+                    height={400}
+                    previewConfig={{ showPreview: false }}
+                  />
+                </PopoverContent>
+              </Popover>
+              
               <button 
-              className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
+              className="text-primary p-2 rounded-full hover:bg-neutral-100 transition-colors focus-visible:outline-primary-500" 
                 title="Create poll"
                 disabled={isSubmitting}
               >
                 <MessageSquarePlus className="h-5 w-5" />
               </button>
-              <button 
-              className="text-primary p-2 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500" 
-                title="Add emoji"
-                disabled={isSubmitting}
-              >
-                <SmilePlus className="h-5 w-5" />
-              </button>
               
               {/* Language selector */}
               <div className="relative ml-1">
                 <button 
-                className="flex items-center text-primary text-sm px-2 py-1 rounded-full hover:bg-neutral-light transition-colors focus-visible:outline-primary-500"
+                className="flex items-center text-primary text-sm px-2 py-1 rounded-full hover:bg-neutral-100 transition-colors focus-visible:outline-primary-500"
                   disabled={isSubmitting}
                 >
                   <span className="flex items-center">
@@ -274,7 +509,7 @@ export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFor
             {/* Post button */}
             <Button 
               onClick={handleSubmit}
-              disabled={!content.trim() || isSubmitting}
+              disabled={!canPost}
               size="sm"
               className="rounded-full px-4"
             >

@@ -57,6 +57,7 @@ export const comments = pgTable("comments", {
   content: text("content").notNull(),
   postId: integer("post_id").notNull(),
   userId: integer("user_id").notNull(),
+  parentId: integer("parent_id"), // For threaded comments (replies)
   createdAt: timestamp("created_at").notNull().defaultNow()
 });
 
@@ -196,7 +197,8 @@ export const insertPostInteractionSchema = createInsertSchema(postInteractions).
 export const insertCommentSchema = createInsertSchema(comments).pick({
   content: true,
   postId: true,
-  userId: true
+  userId: true,
+  parentId: true
 });
 
 export const insertCategorySchema = createInsertSchema(categories).pick({

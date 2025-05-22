@@ -2,14 +2,15 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { useTranslation as useI18nTranslation } from "react-i18next";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { getLanguageTag } from "@/lib/translation";
-import { Post } from "@/types";
+import { Post, Comment } from "@/types";
 import { useToast } from "@/hooks/use-toast";
 import TranslatedText from "@/components/common/TranslatedText";
 import { LuGlobe } from "react-icons/lu";
-import { useAuth } from "@/hooks/simpleAuth.js";
+import { useAuth } from "@/hooks/simpleAuth";
+import { Input } from "@/components/ui/input";
 
 // Add UI components for menu and modal
 import { Menu, MenuButton, MenuList, MenuItem } from "@/components/ui/menu";
@@ -20,9 +21,10 @@ interface PostItemProps {
   post: Post;
   isCircuitPost?: boolean;
   circuitName?: string;
+  hideInlineComments?: boolean; // Hide inline comments (for post detail page)
 }
 
-export default function PostItem({ post, isCircuitPost, circuitName }: PostItemProps) {
+export default function PostItem({ post, isCircuitPost, circuitName, hideInlineComments = false }: PostItemProps) {
   if (!post.author) {
     return null;
   }
@@ -34,6 +36,19 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [commentText, setCommentText] = useState("");
+  const [isCommenting, setIsCommenting] = useState(false);
+
+  // Fetch first few comments for inline display (only if not hiding them)
+  const { data: comments = [] } = useQuery({
+    queryKey: ["post-comments-preview", post.id],
+    queryFn: async () => {
+      const response = await apiRequest("GET", `/api/posts/${post.id}/comments`);
+      console.log('PostItem: Comments data received:', response);
+      return (response as Comment[]).slice(0, 3); // Show only first 3 comments
+    },
+    enabled: post.commentCount > 0 && !hideInlineComments, // Only fetch if there are comments and not hiding them
+  });
 
   const likePostMutation = useMutation({
     mutationFn: async () => {
@@ -101,6 +116,57 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
       toast({
         title: "Error",
         description: `Failed to delete post: ${error}`,
+        variant: "destructive",
+      });
+    }
+  });
+
+  const likeCommentMutation = useMutation({
+    mutationFn: async (commentId: number) => {
+      console.log('PostItem: Making API request for comment like:', commentId);
+      const result = await apiRequest("POST", `/api/comments/${commentId}/like`, {});
+      console.log('PostItem: API response:', result);
+      return result;
+    },
+    onSuccess: (data, commentId) => {
+      console.log('PostItem: Like mutation success for comment:', commentId, 'data:', data);
+      // Invalidate both the comments preview and the main post data
+      queryClient.invalidateQueries({ queryKey: ["post-comments-preview", post.id] });
+      queryClient.invalidateQueries({ queryKey: ["post", post.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+    },
+    onError: (error) => {
+      console.error('PostItem: Like mutation error:', error);
+      toast({
+        title: "Error",
+        description: `Failed to like comment: ${error}`,
+        variant: "destructive",
+      });
+    }
+  });
+
+  const addCommentMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", `/api/posts/${post.id}/comments`, {
+        content: commentText.trim()
+      });
+    },
+    onSuccess: () => {
+      setCommentText("");
+      setIsCommenting(false);
+      // Invalidate queries to refresh comments and post data
+      queryClient.invalidateQueries({ queryKey: ["post-comments-preview", post.id] });
+      queryClient.invalidateQueries({ queryKey: ["post", post.id] });
+      queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+      toast({
+        title: "Comment added",
+        description: "Your comment has been posted.",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Error",
+        description: `Failed to add comment: ${error}`,
         variant: "destructive",
       });
     }
@@ -192,7 +258,7 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
       
       {/* Post Content */}
       <div className="mt-3">
-        <Link href={`/posts/${post.id}`}>
+        <Link href={`/post/${post.id}`}>
           <a className="block group">
             <TranslatedText
               text={post.content}
@@ -218,40 +284,256 @@ export default function PostItem({ post, isCircuitPost, circuitName }: PostItemP
       
       {/* Post Actions */}
       <div className="flex mt-2 pt-2">
-        <button className="flex items-center text-neutral-dark hover:text-primary transition-colors mr-6">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-          <span className="text-sm">{post.commentCount}</span>
-        </button>
+        <Link href={`/post/${post.id}`}>
+          <a className="flex items-center text-neutral-400 hover:text-blue-500 transition-colors mr-6">
+            <svg 
+              xmlns="http://www.w3.org/2000/svg" 
+              className="h-5 w-5 mr-1.5" 
+              fill="none" 
+              viewBox="0 0 24 24" 
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" 
+              />
+            </svg>
+            <span className="text-sm">{post.commentCount}</span>
+          </a>
+        </Link>
         <button 
-          className={`flex items-center ${post.isReposted ? 'text-secondary' : 'text-neutral-dark hover:text-secondary'} transition-colors mr-6`}
+          className={`flex items-center transition-colors mr-6 ${
+            post.isReposted 
+              ? 'text-green-500 hover:text-green-600' 
+              : 'text-neutral-400 hover:text-green-500'
+          }`}
           onClick={() => repostMutation.mutate()}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill={post.isReposted ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            className="h-5 w-5 mr-1.5" 
+            fill={post.isReposted ? "currentColor" : "none"} 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" 
+            />
           </svg>
           <span className="text-sm">{post.repostCount}</span>
         </button>
         <button 
-          className={`flex items-center ${post.isLiked ? 'text-accent' : 'text-neutral-dark hover:text-accent'} transition-colors mr-6`}
+          className={`flex items-center transition-colors mr-6 ${
+            post.isLiked 
+              ? 'text-red-500 hover:text-red-600' 
+              : 'text-neutral-400 hover:text-red-500'
+          }`}
           onClick={() => likePostMutation.mutate()}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill={post.isLiked ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            className="h-5 w-5 mr-1.5" 
+            fill={post.isLiked ? "currentColor" : "none"} 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" 
+            />
           </svg>
           <span className="text-sm">{post.likeCount}</span>
         </button>
         <button 
-          className="flex items-center text-neutral-dark hover:text-primary transition-colors"
+          className={`flex items-center transition-colors ${
+            post.isSaved 
+              ? 'text-yellow-500 hover:text-yellow-600' 
+              : 'text-neutral-400 hover:text-yellow-500'
+          }`}
           onClick={() => savePostMutation.mutate()}
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            className="h-5 w-5 mr-1.5" 
+            fill={post.isSaved ? "currentColor" : "none"} 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" 
+            />
           </svg>
           <span className="text-sm">Save</span>
         </button>
       </div>
+
+      {/* Inline Comments Preview */}
+      {!hideInlineComments && comments.length > 0 && (
+        <div className="mt-3 border-t border-neutral-200 pt-3">
+          <div className="space-y-3">
+            {comments.map((comment) => (
+              <div key={comment.id} className="flex items-start space-x-2">
+                <Link href={`/profile/${comment.author.username}`}>
+                  <a>
+                    <Avatar className="w-6 h-6">
+                      <AvatarImage src={comment.author.profileImage} alt={comment.author.name} />
+                      <AvatarFallback className="text-xs">{comment.author.name.charAt(0)}</AvatarFallback>
+                    </Avatar>
+                  </a>
+                </Link>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center space-x-1 mb-0.5">
+                    <Link href={`/profile/${comment.author.username}`}>
+                      <a className="text-sm font-medium text-neutral-800 hover:underline truncate">
+                        {comment.author.name}
+                      </a>
+                    </Link>
+                    <span className="text-xs text-neutral-500">•</span>
+                    <span className="text-xs text-neutral-500">{comment.createdAt}</span>
+                  </div>
+                  <p className="text-sm text-neutral-700 leading-relaxed">
+                    {comment.content}
+                  </p>
+                  <div className="flex items-center mt-1.5 space-x-4">
+                    {/* Like button */}
+                    <button 
+                      className={`flex items-center space-x-1 text-xs transition-colors ${
+                        comment.isLiked 
+                          ? 'text-red-500 hover:text-red-600' 
+                          : 'text-neutral-500 hover:text-red-500'
+                      }`}
+                      onClick={(e) => {
+                        console.log('Inline comment heart clicked:', {
+                          commentId: comment.id,
+                          isLiked: comment.isLiked,
+                          likeCount: comment.likeCount,
+                          event: e
+                        });
+                        e.preventDefault();
+                        e.stopPropagation();
+                        likeCommentMutation.mutate(comment.id);
+                      }}
+                    >
+                      <svg 
+                        xmlns="http://www.w3.org/2000/svg" 
+                        className="h-3.5 w-3.5" 
+                        fill={comment.isLiked ? "currentColor" : "none"} 
+                        viewBox="0 0 24 24" 
+                        stroke="currentColor"
+                      >
+                        <path 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round" 
+                          strokeWidth="2" 
+                          d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" 
+                        />
+                      </svg>
+                      {comment.likeCount > 0 && (
+                        <span>{comment.likeCount}</span>
+                      )}
+                    </button>
+                    
+                    {/* Reply button */}
+                    <Link href={`/post/${post.id}`}>
+                      <a className="text-xs text-neutral-500 hover:text-neutral-700 transition-colors font-medium">
+                        Reply
+                      </a>
+                    </Link>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {/* View all comments link */}
+          {post.commentCount > comments.length && (
+            <div className="mt-3 pt-2">
+              <Link href={`/post/${post.id}`}>
+                <a className="text-sm text-primary hover:underline font-medium">
+                  View all {post.commentCount} comments
+                </a>
+              </Link>
+            </div>
+          )}
+
+          {/* Quick comment input */}
+          {currentUser && (
+            <div className="mt-3 pt-3 border-t border-neutral-100">
+              {!isCommenting ? (
+                <button
+                  onClick={() => setIsCommenting(true)}
+                  className="flex items-center space-x-2 w-full text-left"
+                >
+                  <Avatar className="w-6 h-6">
+                    <AvatarImage src="/default-profile.png" alt={currentUser.name || currentUser.username} />
+                    <AvatarFallback className="text-xs">{(currentUser.name || currentUser.username).charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <span className="text-sm text-neutral-500 hover:text-neutral-700 transition-colors">
+                    Add a comment...
+                  </span>
+                </button>
+              ) : (
+                <div className="flex items-start space-x-2">
+                  <Avatar className="w-6 h-6 flex-shrink-0">
+                    <AvatarImage src="/default-profile.png" alt={currentUser.name || currentUser.username} />
+                    <AvatarFallback className="text-xs">{(currentUser.name || currentUser.username).charAt(0)}</AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 space-y-2">
+                    <Input
+                      placeholder="Write a comment..."
+                      value={commentText}
+                      onChange={(e) => setCommentText(e.target.value)}
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter' && commentText.trim() && !addCommentMutation.isPending) {
+                          addCommentMutation.mutate();
+                        }
+                        if (e.key === 'Escape') {
+                          setIsCommenting(false);
+                          setCommentText("");
+                        }
+                      }}
+                      className="text-sm border-0 border-b-2 border-neutral-200 rounded-none focus:border-primary px-0 bg-transparent"
+                      autoFocus
+                    />
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => {
+                          if (commentText.trim()) {
+                            addCommentMutation.mutate();
+                          }
+                        }}
+                        disabled={!commentText.trim() || addCommentMutation.isPending}
+                        className="text-xs text-primary hover:text-primary-600 font-medium disabled:text-neutral-400 disabled:cursor-not-allowed"
+                      >
+                        {addCommentMutation.isPending ? "Posting..." : "Post"}
+                      </button>
+                      <button
+                        onClick={() => {
+                          setIsCommenting(false);
+                          setCommentText("");
+                        }}
+                        className="text-xs text-neutral-500 hover:text-neutral-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Confirmation Dialog */}
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>

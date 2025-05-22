@@ -1,4 +1,5 @@
 import type { Express, Request, Response } from "express";
+import express from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage.ts";
 import { loginSchema, insertUserSchema, insertPostSchema, type Circuit, type Follow } from "../shared/schema.ts";
@@ -7,6 +8,9 @@ import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { webcrypto } from 'node:crypto';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs/promises';
 // @ts-ignore
 if (!globalThis.crypto && typeof window === 'undefined') globalThis.crypto = webcrypto; // Ensure it only runs in Node.js
 import { and, eq, gt, inArray } from "drizzle-orm";
@@ -59,6 +63,42 @@ const verifyNoble = secp256k1Verify;
 const sha256 = nobleSha256;
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  // Create uploads directory if it doesn't exist
+  const uploadsDir = path.join(process.cwd(), 'uploads');
+  try {
+    await fs.access(uploadsDir);
+  } catch {
+    await fs.mkdir(uploadsDir, { recursive: true });
+  }
+
+  // Configure multer for image uploads
+  const storage_multer = multer.diskStorage({
+    destination: (req, file, cb) => {
+      cb(null, uploadsDir);
+    },
+    filename: (req, file, cb) => {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      cb(null, `image-${uniqueSuffix}${path.extname(file.originalname)}`);
+    }
+  });
+
+  const upload = multer({
+    storage: storage_multer,
+    limits: {
+      fileSize: 10 * 1024 * 1024, // 10MB limit
+    },
+    fileFilter: (req, file, cb) => {
+      if (file.mimetype.startsWith('image/')) {
+        cb(null, true);
+      } else {
+        cb(new Error('Only image files are allowed!'));
+      }
+    }
+  });
+
+  // Serve static files from uploads directory
+  app.use('/uploads', express.static(uploadsDir));
+
   // Middleware to check authentication
   const authMiddleware = (req: Request, res: Response, next: () => void) => {
     // First check session from cookies
@@ -130,7 +170,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return null;
     }
     const likeCount = await storage.getPostInteractionCount(post.id, "like");
-    const commentCount = await storage.getPostInteractionCount(post.id, "comment");
+    const commentCount = (await storage.getPostComments(post.id)).length;
     const repostCount = await storage.getPostInteractionCount(post.id, "repost");
     let isLiked = false;
     let isReposted = false;
@@ -779,6 +819,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get individual post
+  app.get("/api/posts/:id", async (req, res) => {
+    try {
+      const postId = parseInt(req.params.id);
+      const post = await storage.getPost(postId);
+      
+      if (!post) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      
+      const currentUserId = req.headers.authorization ? 
+        req.session?.userId : undefined;
+      
+      const formattedPost = await formatPost(post, currentUserId);
+      
+      if (!formattedPost) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      
+      res.status(200).json(formattedPost);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
   // Post Routes
   app.get("/api/posts", authMiddleware, async (req, res) => {
     try {
@@ -1027,6 +1092,224 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Comment Routes
+  app.get("/api/posts/:id/comments", async (req, res) => {
+    try {
+      const postId = parseInt(req.params.id);
+      const comments = await storage.getPostComments(postId);
+      
+      const currentUserId = req.headers.authorization ? 
+        req.session?.userId : undefined;
+      
+      // Format comments with author info and like status
+      const formattedComments = await Promise.all(
+        comments.map(async (comment) => {
+          const author = await storage.getUser(comment.userId);
+          if (!author) return null;
+          
+          const likeCount = await storage.getPostInteractionCount(comment.id, "like");
+          let isLiked = false;
+          
+          if (currentUserId) {
+            isLiked = await storage.hasInteraction(comment.id, currentUserId, "like");
+          }
+          
+          // Get replies for this comment
+          const replies = await storage.getCommentReplies(comment.id);
+          const formattedReplies = await Promise.all(
+            replies.map(async (reply) => {
+              const replyAuthor = await storage.getUser(reply.userId);
+              if (!replyAuthor) return null;
+              
+              const replyLikeCount = await storage.getPostInteractionCount(reply.id, "like");
+              let replyIsLiked = false;
+              
+              if (currentUserId) {
+                replyIsLiked = await storage.hasInteraction(reply.id, currentUserId, "like");
+              }
+              
+              return {
+                id: reply.id,
+                content: reply.content,
+                createdAt: formatDate(reply.createdAt),
+                author: {
+                  id: replyAuthor.id,
+                  username: replyAuthor.username,
+                  name: replyAuthor.name,
+                  profileImage: replyAuthor.profileImage,
+                  isVerified: replyAuthor.isVerified
+                },
+                likeCount: replyLikeCount,
+                isLiked: replyIsLiked,
+                parentId: reply.parentId
+              };
+            })
+          );
+          
+          return {
+            id: comment.id,
+            content: comment.content,
+            createdAt: formatDate(comment.createdAt),
+            author: {
+              id: author.id,
+              username: author.username,
+              name: author.name,
+              profileImage: author.profileImage,
+              isVerified: author.isVerified
+            },
+            likeCount,
+            isLiked,
+            replies: formattedReplies.filter(Boolean)
+          };
+        })
+      );
+      
+      res.status(200).json(formattedComments.filter(Boolean));
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.post("/api/posts/:id/comments", authMiddleware, async (req, res) => {
+    try {
+      const postId = parseInt(req.params.id);
+      const userId = req.body.currentUserId;
+      const { content, parentId } = req.body;
+      
+      if (!content?.trim()) {
+        return res.status(400).json({ message: "Comment content is required" });
+      }
+      
+      const post = await storage.getPost(postId);
+      if (!post) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      
+      // If replying to a comment, verify the parent comment exists
+      if (parentId) {
+        const parentComment = await storage.getComment(parentId);
+        if (!parentComment) {
+          return res.status(404).json({ message: "Parent comment not found" });
+        }
+        if (parentComment.postId !== postId) {
+          return res.status(400).json({ message: "Parent comment does not belong to this post" });
+        }
+      }
+      
+      const newComment = await storage.createComment({
+        content: content.trim(),
+        postId,
+        userId,
+        parentId: parentId || null
+      });
+      
+      // Create notification for post author (if not commenting on own post)
+      if (post.userId !== userId) {
+        await storage.createNotification({
+          type: "comment",
+          actorId: userId,
+          recipientId: post.userId,
+          postId,
+          data: {}
+        });
+      }
+      
+      // If replying to a comment, create notification for comment author
+      if (parentId) {
+        const parentComment = await storage.getComment(parentId);
+        if (parentComment && parentComment.userId !== userId) {
+          await storage.createNotification({
+            type: "comment",
+            actorId: userId,
+            recipientId: parentComment.userId,
+            postId,
+            data: { parentCommentId: parentId }
+          });
+        }
+      }
+      
+      // Format the created comment
+      const author = await storage.getUser(userId);
+      const formattedComment = {
+        id: newComment.id,
+        content: newComment.content,
+        createdAt: formatDate(newComment.createdAt),
+        author: {
+          id: author!.id,
+          username: author!.username,
+          name: author!.name,
+          profileImage: author!.profileImage,
+          isVerified: author!.isVerified
+        },
+        likeCount: 0,
+        isLiked: false,
+        parentId: newComment.parentId,
+        replies: []
+      };
+      
+      res.status(201).json(formattedComment);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.post("/api/comments/:id/like", authMiddleware, async (req, res) => {
+    try {
+      const commentId = parseInt(req.params.id);
+      const userId = req.body.currentUserId;
+      
+      const comment = await storage.getComment(commentId);
+      if (!comment) {
+        return res.status(404).json({ message: "Comment not found" });
+      }
+      
+      const hasLiked = await storage.hasInteraction(commentId, userId, "like");
+      
+      if (hasLiked) {
+        await storage.removeInteraction(commentId, userId, "like");
+        res.status(200).json({ message: "Comment unliked successfully" });
+      } else {
+        await storage.addInteraction(commentId, userId, "like");
+        
+        // Create notification if the comment author is not the current user
+        if (comment.userId !== userId) {
+          await storage.createNotification({
+            type: "like",
+            actorId: userId,
+            recipientId: comment.userId,
+            postId: comment.postId,
+            data: { commentId }
+          });
+        }
+        
+        res.status(200).json({ message: "Comment liked successfully" });
+      }
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.delete("/api/comments/:id", authMiddleware, async (req, res) => {
+    try {
+      const commentId = parseInt(req.params.id);
+      const userId = req.body.currentUserId;
+      
+      const comment = await storage.getComment(commentId);
+      if (!comment) {
+        return res.status(404).json({ message: "Comment not found" });
+      }
+      
+      if (comment.userId !== userId) {
+        return res.status(403).json({ message: "You can only delete your own comments" });
+      }
+      
+      await storage.deleteComment(commentId);
+      res.status(204).end();
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
   // Categories API
   app.get("/api/categories", async (req, res) => {
     try {
@@ -1255,6 +1538,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(200).json(trends);
     } catch (error) {
       handleError(error, res);
+    }
+  });
+
+  // Image upload endpoint
+  app.post("/api/upload/image", upload.single('image'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No image file provided" });
+      }
+
+      // Return the URL where the image can be accessed
+      const imageUrl = `/uploads/${req.file.filename}`;
+      
+      res.status(200).json({
+        url: imageUrl,
+        filename: req.file.filename,
+        size: req.file.size,
+        mimetype: req.file.mimetype
+      });
+    } catch (error) {
+      console.error("Error uploading image:", error);
+      res.status(500).json({ message: "Failed to upload image" });
     }
   });
 

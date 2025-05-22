@@ -47,7 +47,7 @@ const fetchCircuitsByCategory = async (categoryKey: string): Promise<CircuitList
       break;
     case 'trending':
       endpoint = '/api/circuits/trending';
-      break;
+        break;
     default:
       // For real categories, use the category slug endpoint
       endpoint = `/api/categories/${categoryKey}/circuits`;

@@ -119,15 +119,15 @@ const CreateCircuitPage: React.FC = () => {
         <div>
           <Label className="font-semibold mb-2 block">Category <span className="font-normal text-neutral-500">(Optional)</span></Label>
           <Select 
-            value={categoryId?.toString() || ""} 
-            onValueChange={(value) => setCategoryId(value ? parseInt(value) : undefined)}
+            value={categoryId?.toString() || "none"} 
+            onValueChange={(value) => setCategoryId(value === "none" ? undefined : parseInt(value))}
             disabled={categoriesLoading}
           >
             <SelectTrigger className="mt-1">
               <SelectValue placeholder={categoriesLoading ? "Loading categories..." : "Select a category"} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">No category</SelectItem>
+              <SelectItem value="none">No category</SelectItem>
               {categories.map((category: any) => (
                 <SelectItem key={category.id} value={category.id.toString()}>
                   {category.name}

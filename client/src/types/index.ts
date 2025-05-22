@@ -74,6 +74,8 @@ export interface Comment {
   author: User;
   likeCount: number;
   isLiked: boolean;
+  parentId?: number | null;
+  replies?: Comment[];
 }
 
 // Notification types

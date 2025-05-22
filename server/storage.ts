@@ -54,6 +54,13 @@ export interface IStorage {
   hasInteraction(postId: number, userId: number, type: string): Promise<boolean>;
   getPostInteractionCount(postId: number, type: string): Promise<number>;
 
+  // Comment operations
+  createComment(comment: InsertComment): Promise<Comment>;
+  getPostComments(postId: number): Promise<Comment[]>;
+  getComment(id: number): Promise<Comment | undefined>;
+  deleteComment(id: number): Promise<void>;
+  getCommentReplies(parentId: number): Promise<Comment[]>;
+
   // Category operations
   getCategories(): Promise<Category[]>;
   getCategory(id: number): Promise<Category | undefined>;
@@ -1221,6 +1228,76 @@ export class DatabaseStorage implements IStorage {
       return mutualFollowers || [];
     } catch (error) {
       console.error("Error in getMutualFollowers:", error);
+      return [];
+    }
+  }
+
+  // Comment operations
+  async createComment(insertComment: InsertComment): Promise<Comment> {
+    try {
+      const [comment] = await db
+        .insert(comments)
+        .values({
+          ...insertComment,
+          createdAt: new Date()
+        })
+        .returning();
+      return comment;
+    } catch (error) {
+      console.error("Error in createComment:", error);
+      throw error;
+    }
+  }
+
+  async getPostComments(postId: number): Promise<Comment[]> {
+    try {
+      return await db
+        .select()
+        .from(comments)
+        .where(and(
+          eq(comments.postId, postId),
+          sql`parent_id IS NULL` // Only get top-level comments
+        ))
+        .orderBy(comments.createdAt);
+    } catch (error) {
+      console.error("Error in getPostComments:", error);
+      return [];
+    }
+  }
+
+  async getComment(id: number): Promise<Comment | undefined> {
+    try {
+      const [comment] = await db
+        .select()
+        .from(comments)
+        .where(eq(comments.id, id));
+      return comment;
+    } catch (error) {
+      console.error("Error in getComment:", error);
+      return undefined;
+    }
+  }
+
+  async deleteComment(id: number): Promise<void> {
+    try {
+      await db
+        .delete(comments)
+        .where(eq(comments.id, id));
+    } catch (error) {
+      console.error("Error in deleteComment:", error);
+      throw error;
+    }
+  }
+
+  async getCommentReplies(parentId: number): Promise<Comment[]> {
+    try {
+      return await db
+        .select()
+        .from(comments)
+        .where(eq(comments.parentId, parentId))
+        .orderBy(comments.createdAt);
+    } catch (error) {
+      console.error("Error in getCommentReplies:", error);
       return [];
     }
   }
