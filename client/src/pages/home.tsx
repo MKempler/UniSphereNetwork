@@ -35,7 +35,7 @@ export default function Home() {
     queryFn: async ({ pageParam = 1 }) => {
       const url = `/api/posts?feedType=${feedType}&page=${pageParam}`;
       const res = await apiRequest("GET", url);
-      return res.json();
+      return res;
     },
     getNextPageParam: (lastPage: { page: number; totalPages: number }) => {
       if (lastPage.page < lastPage.totalPages) {

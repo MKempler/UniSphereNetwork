@@ -6,8 +6,9 @@ import { detectLanguage, translateText } from "./translation.ts";
 import { z } from "zod";
 import { ZodError } from "zod";
 import { fromZodError } from "zod-validation-error";
-// @ts-ignore: No type definitions for @decentralized-identity/ion-tools
-// import * as Ion from '@decentralized-identity/ion-tools';
+import { webcrypto } from 'node:crypto';
+// @ts-ignore
+if (!globalThis.crypto && typeof window === 'undefined') globalThis.crypto = webcrypto; // Ensure it only runs in Node.js
 import { and, eq, gt, inArray } from "drizzle-orm";
 // @ts-ignore: No type definitions for node-fetch (should be resolved by @types/node-fetch, but just in case)
 import fetch from "node-fetch";
@@ -18,6 +19,11 @@ import { db } from "./db.ts";
 import bcrypt from "bcrypt";
 import crypto from 'crypto';
 import type { Session } from "express-session";
+import { resolve as ionResolve, DID, generateKeyPair as generateIonKeys, sign as ionSign, verify as ionVerify } from '@decentralized-identity/ion-tools';
+import session from 'express-session';
+import { RedisStore } from 'connect-redis';
+import { verify as secp256k1Verify } from '@noble/secp256k1';
+import { sha256 as nobleSha256 } from '@noble/hashes/sha256';
 
 declare module "express-session" {
   interface SessionData {
@@ -47,6 +53,10 @@ const NODE_DID_DOC = {
 };
 
 const RELAY_URL = process.env.RELAY_URL || "http://localhost:5000";
+
+// Helper for noble/secp256k1 verify
+const verifyNoble = secp256k1Verify;
+const sha256 = nobleSha256;
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Middleware to check authentication
@@ -219,81 +229,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
 
     // In the /api/auth/register route, comment out or remove the DID resolution/validation block that uses Ion
-    // try {
-    //   console.log('[/api/auth/register] Attempting to resolve DID:', did);
-    //   const didDocumentResolution = await Ion.resolve(did);
-    //   console.log('[/api/auth/register] DID resolved. Resolution object:', JSON.stringify(didDocumentResolution, null, 2));
+    try {
+      console.log('[/api/auth/register] Attempting to resolve DID:', did);
+      const didDocumentResolution = await ionResolve(did); // Use ionResolve from ion-tools
+      console.log('[/api/auth/register] DID resolved. Resolution object:', JSON.stringify(didDocumentResolution, null, 2));
 
-    //   if (!didDocumentResolution || !didDocumentResolution.didDocument) {
-    //     console.error('[/api/auth/register] Ion.resolve did not return a valid DID document structure for DID:', did);
-    //     return res.status(400).json({ message: "Failed to resolve DID: No DID document found in resolution result." });
-    //   }
-    //   
-    //   const didDocument = didDocumentResolution.didDocument;
-    //   let actualPublicKeyJwk = null;
-    //
-    //   // Corrected logic to find the public key based on DID Document structure
-    //   if (didDocument.verificationMethod && Array.isArray(didDocument.verificationMethod)) {
-    //     for (const vm of didDocument.verificationMethod) {
-    //       if (vm.id && vm.publicKeyJwk) {
-    //         // Check if this verification method is used for authentication or assertion
-    //         const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === vm.id) || (typeof auth === 'object' && auth?.id === vm.id));
-    //         const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === vm.id) || (typeof assert === 'object' && assert?.id === vm.id));
-    //         
-    //         // DID Core spec allows purposes to be directly in verificationMethod too, though ion-tools output seems to use the reference model primarily.
-    //         // We check for direct purposes as a fallback.
-    //         const directPurposes = vm.purposes && Array.isArray(vm.purposes) && (vm.purposes.includes('authentication') || vm.purposes.includes('assertionMethod'));
-    //
-    //         if (isAuthMethod || isAssertionMethod || directPurposes) {
-    //           actualPublicKeyJwk = vm.publicKeyJwk;
-    //           console.log(`[/api/auth/register] Found matching publicKeyJwk in verificationMethod with id: ${vm.id}`);
-    //           break; // Found the key
-    //         }
-    //       }
-    //     }
-    //   }
-    //
-    //   if (!actualPublicKeyJwk) {
-    //       // Fallback: Check the deprecated `publicKey` section if it exists (less common for ION DIDs but good for robustness)
-    //       if (didDocument.publicKey && Array.isArray(didDocument.publicKey)) {
-    //           console.log('[/api/auth/register] Checking deprecated publicKey array in DID document.');
-    //           for (const pk of didDocument.publicKey) {
-    //               if (pk.id && pk.publicKeyJwk && pk.type === 'EcdsaSecp256k1VerificationKey2019') {
-    //                    // Check if this public key is referenced in authentication or assertionMethod
-    //                   const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === pk.id) || (typeof auth === 'object' && auth?.id === pk.id));
-    //                   const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === pk.id) || (typeof assert === 'object' && assert?.id === pk.id));
-    //                   
-    //                   if (isAuthMethod || isAssertionMethod) {
-    //                       actualPublicKeyJwk = pk.publicKeyJwk;
-    //                       console.log(`[/api/auth/register] Found matching publicKeyJwk in deprecated publicKey array with id: ${pk.id}`);
-    //                       break;
-    //                   }
-    //               }
-    //           }
-    //       }
-    //   }
-    //
-    //   if (!actualPublicKeyJwk) {
-    //       console.error('[/api/auth/register] Could not find a suitable public key in DID document for DID:', did, 'Document:', JSON.stringify(didDocument, null, 2));
-    //       return res.status(400).json({ message: "Failed to extract a suitable public key from DID document for validation." });
-    //   }
-    //   
-    //   const providedKeyString = JSON.stringify(parsedPublicKey, Object.keys(parsedPublicKey).sort());
-    //   const resolvedKeyString = JSON.stringify(actualPublicKeyJwk, Object.keys(actualPublicKeyJwk).sort());
-    //
-    //   console.log('[/api/auth/register] Provided PublicKey for comparison:', providedKeyString);
-    //   console.log('[/api/auth/register] Resolved PublicKeyJwk from DID for comparison:', resolvedKeyString);
-    //
-    //   if (providedKeyString !== resolvedKeyString) {
-    //     console.error('[/api/auth/register] Public key mismatch. Provided:', providedKeyString, 'Resolved from DID:', resolvedKeyString);
-    //     return res.status(400).json({ message: "Public key mismatch between provided key and DID document." });
-    //   }
-    //   console.log('[/api/auth/register] DID and PublicKey validated successfully.');
-    //
-    // } catch (error: any) {
-    //   console.error('[/api/auth/register] Error during DID resolution/validation for DID:', did, error);
-    //   return res.status(400).json({ message: "Failed to resolve/validate DID.", errorName: error.name, errorMessage: error.message });
-    // }
+      if (!didDocumentResolution || !didDocumentResolution.didDocument) {
+        console.error('[/api/auth/register] ionResolve did not return a valid DID document structure for DID:', did);
+        return res.status(400).json({ message: "Failed to resolve DID: No DID document found in resolution result." });
+      }
+      
+      const didDocument = didDocumentResolution.didDocument;
+      let actualPublicKeyJwk = null;
+
+      // Corrected logic to find the public key based on DID Document structure
+      if (didDocument.verificationMethod && Array.isArray(didDocument.verificationMethod)) {
+        for (const vm of didDocument.verificationMethod) {
+          if (vm.id && vm.publicKeyJwk) {
+            // Check if this verification method is used for authentication or assertion
+            const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === vm.id) || (typeof auth === 'object' && auth?.id === vm.id));
+            const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === vm.id) || (typeof assert === 'object' && assert?.id === vm.id));
+            
+            // DID Core spec allows purposes to be directly in verificationMethod too, though ion-tools output seems to use the reference model primarily.
+            // We check for direct purposes as a fallback.
+            const directPurposes = vm.purposes && Array.isArray(vm.purposes) && (vm.purposes.includes('authentication') || vm.purposes.includes('assertionMethod'));
+
+            if (isAuthMethod || isAssertionMethod || directPurposes) {
+              actualPublicKeyJwk = vm.publicKeyJwk;
+              console.log(`[/api/auth/register] Found matching publicKeyJwk in verificationMethod with id: ${vm.id}`);
+              break; // Found the key
+            }
+          }
+        }
+      }
+
+      if (!actualPublicKeyJwk) {
+          // Fallback: Check the deprecated `publicKey` section if it exists (less common for ION DIDs but good for robustness)
+          if (didDocument.publicKey && Array.isArray(didDocument.publicKey)) {
+              console.log('[/api/auth/register] Checking deprecated publicKey array in DID document.');
+              for (const pk of didDocument.publicKey) {
+                  if (pk.id && pk.publicKeyJwk && pk.type === 'EcdsaSecp256k1VerificationKey2019') {
+                       // Check if this public key is referenced in authentication or assertionMethod
+                      const isAuthMethod = didDocument.authentication && Array.isArray(didDocument.authentication) && didDocument.authentication.some((auth: string | any) => (typeof auth === 'string' && auth === pk.id) || (typeof auth === 'object' && auth?.id === pk.id));
+                      const isAssertionMethod = didDocument.assertionMethod && Array.isArray(didDocument.assertionMethod) && didDocument.assertionMethod.some((assert: string | any) => (typeof assert === 'string' && assert === pk.id) || (typeof assert === 'object' && assert?.id === pk.id));
+                      
+                      if (isAuthMethod || isAssertionMethod) {
+                          actualPublicKeyJwk = pk.publicKeyJwk;
+                          console.log(`[/api/auth/register] Found matching publicKeyJwk in deprecated publicKey array with id: ${pk.id}`);
+                          break;
+                      }
+                  }
+              }
+          }
+      }
+
+      if (!actualPublicKeyJwk) {
+          console.error('[/api/auth/register] Could not find a suitable public key in DID document for DID:', did, 'Document:', JSON.stringify(didDocument, null, 2));
+          return res.status(400).json({ message: "Failed to extract a suitable public key from DID document for validation." });
+      }
+      
+      const providedKeyString = JSON.stringify(parsedPublicKey, Object.keys(parsedPublicKey).sort());
+      const resolvedKeyString = JSON.stringify(actualPublicKeyJwk, Object.keys(actualPublicKeyJwk).sort());
+
+      console.log('[/api/auth/register] Provided PublicKey for comparison:', providedKeyString);
+      console.log('[/api/auth/register] Resolved PublicKeyJwk from DID for comparison:', resolvedKeyString);
+
+      if (providedKeyString !== resolvedKeyString) {
+        console.error('[/api/auth/register] Public key mismatch. Provided:', providedKeyString, 'Resolved from DID:', resolvedKeyString);
+        return res.status(400).json({ message: "Public key mismatch between provided key and DID document." });
+      }
+      console.log('[/api/auth/register] DID and PublicKey validated successfully.');
+
+    } catch (error: any) {
+      console.error('[/api/auth/register] Error during DID resolution/validation for DID:', did, error);
+      return res.status(400).json({ message: "Failed to resolve/validate DID.", errorName: error.name, errorMessage: error.message });
+    }
 
     try {
       const newUser = await storage.createUser({
@@ -393,18 +403,210 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     
     if (req.session) {
-      const userId = req.session.userId;
-      console.log(`Logging out user ID ${userId} with session ${sessionId}`);
+      const userId = req.session.userId; 
+      console.log(`Logging out user ID ${userId || 'unknown'} with session ${sessionId}`);
       req.session.destroy((err) => {
         if (err) {
           console.error('Error destroying session:', err);
+          // Ensure response is sent even if destroy fails
+          if (!res.headersSent) {
+            return res.status(500).json({ message: "Error destroying session" }); 
+          }
+          return; // exit if headers already sent
+        }
+        // req.session is not available here, it has been destroyed.
+        console.log(`Session ${sessionId} destroyed successfully.`);
+        if (!res.headersSent) {
+            res.status(200).json({ message: "Logged out successfully" });
         }
       });
-      console.log(`Session removed, remaining sessions: ${Object.keys(req.session).length}`);
-      return res.status(200).json({ message: "Logged out successfully" });
     } else {
-      console.log(`Logout: Session ID ${sessionId} not found`);
+      console.log(`Logout: Session ID ${sessionId} not found or no active session to destroy.`);
       return res.status(400).json({ message: "Invalid session" });
+    }
+  });
+
+  app.get("/api/auth/did/challenge", (req, res) => {
+    try {
+      const challenge = crypto.randomBytes(32).toString('hex');
+      // In a more robust system, you might temporarily store this challenge server-side
+      // to prevent replay attacks or associate it with a pre-login session.
+      // For now, we'll just return it. The client must send it back with the signature.
+      console.log("[/api/auth/did/challenge] Generated challenge:", challenge);
+      res.status(200).json({ challenge });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.post("/api/auth/did/login", async (req, res) => {
+    const { did, challenge, jws } = req.body;
+
+    if (!did || !challenge || !jws) {
+      return res.status(400).json({ message: "DID, challenge, and JWS are required." });
+    }
+
+    try {
+      console.log(`[/api/auth/did/login] Attempting login for DID: ${did}`);
+      const user = await storage.getUserByDid(did);
+
+      if (!user) {
+        console.log(`[/api/auth/did/login] User not found for DID: ${did}`);
+        return res.status(404).json({ message: "User with this DID not found." });
+      }
+
+      if (!user.publicKey) {
+        console.log(`[/api/auth/did/login] Public key not found for user with DID: ${did}`);
+        return res.status(400).json({ message: "Public key for user not found. Cannot verify signature." });
+      }
+
+      let publicKeyJwk;
+      try {
+        publicKeyJwk = JSON.parse(user.publicKey);
+      } catch (e) {
+        console.error(`[/api/auth/did/login] Failed to parse stored publicKeyJwk for DID: ${did}`, e);
+        return res.status(500).json({ message: "Error parsing stored public key." });
+      }
+
+      console.log(`[/api/auth/did/login] Verifying JWS for DID: ${did}. Challenge: ${challenge}`);
+      
+      // Extensive publicKeyJwk debugging before ionVerify
+      console.log(`[/api/auth/did/login] typeof publicKeyJwk: ${typeof publicKeyJwk}`);
+      if (publicKeyJwk) {
+        console.log(`[/api/auth/did/login] Object.keys(publicKeyJwk): ${Object.keys(publicKeyJwk).join(', ')}`);
+        console.log(`[/api/auth/did/login] publicKeyJwk.crv: ${publicKeyJwk.crv}`);
+        console.log(`[/api/auth/did/login] publicKeyJwk.kty: ${publicKeyJwk.kty}`);
+        console.log(`[/api/auth/did/login] publicKeyJwk.x: ${publicKeyJwk.x}`);
+        console.log(`[/api/auth/did/login] publicKeyJwk directly:`, JSON.stringify(publicKeyJwk));
+      } else {
+        console.log(`[/api/auth/did/login] publicKeyJwk is null or undefined before ionVerify.`);
+        return res.status(500).json({ message: "Internal server error: public key not found for user." }); // Should not happen if user is found by DID
+      }
+      
+      // Defensively reconstruct the publicKeyJwk to ensure it's a plain object with expected properties
+      const reconstructedPublicKeyJwk = {
+        kty: publicKeyJwk.kty,
+        crv: publicKeyJwk.crv,
+        x: publicKeyJwk.x,
+        y: publicKeyJwk.y
+        // Do not include other properties like 'd' even if they exist on the parsed object
+      };
+
+      console.log(`[/api/auth/did/login] Reconstructed publicKeyJwk:`, JSON.stringify(reconstructedPublicKeyJwk));
+      console.log(`[/api/auth/did/login] typeof reconstructedPublicKeyJwk.crv: ${typeof reconstructedPublicKeyJwk.crv}`);
+
+      // JWS structure is: header_encoded.payload_encoded.signature_encoded
+      const parts = jws.split('.');
+      if (parts.length !== 3) {
+        console.log(`[/api/auth/did/login] JWS has invalid structure (not 3 parts) for DID: ${did}`);
+        return res.status(400).json({ message: "Invalid JWS structure." });
+      }
+      const headerEncoded = parts[0];
+      const payloadEncoded = parts[1];
+      const signatureEncoded = parts[2];
+
+      // The "JWS Signing Input" is ASCII(BASE64URL(UTF8(JWS Protected Header)) + '.' + BASE64URL(JWS Payload))
+      // This is what the signature is calculated over.
+      const signingInput = `${headerEncoded}.${payloadEncoded}`;
+      const messageToVerify = Buffer.from(signingInput, 'utf8'); // noble expects Uint8Array or string for message
+
+      // Hash the message (signing input) as required by secp256k1.verify
+      // noble's verify function takes the hash of the message, not the raw message for ECDSA.
+      const messageHash = sha256(messageToVerify); // Returns Uint8Array
+
+      console.log(`[/api/auth/did/login] Verifying with @noble/secp256k1.`);
+      console.log(`[/api/auth/did/login] JWS Signing Input: ${signingInput}`);
+      console.log(`[/api/auth/did/login] Message hash (hex): ${Buffer.from(messageHash).toString('hex')}`);
+
+      // The signature from JWS is Base64URL encoded. Decode it to raw bytes.
+      let signatureBytes: Uint8Array;
+      try {
+        signatureBytes = Buffer.from(signatureEncoded, 'base64url');
+      } catch (e) {
+        console.log(`[/api/auth/did/login] Failed to Base64URL decode signature for DID: ${did}`, e);
+        return res.status(400).json({ message: "Invalid JWS signature encoding." });
+      }
+      
+      console.log(`[/api/auth/did/login] Signature (hex): ${Buffer.from(signatureBytes).toString('hex')}`);
+
+      // Correct way to form uncompressed public key from x and y JWK parts:
+      // Convert x and y from Base64URL to hex, then prefix with '04'
+      const xHex = Buffer.from(reconstructedPublicKeyJwk.x, 'base64url').toString('hex');
+      const yHex = Buffer.from(reconstructedPublicKeyJwk.y, 'base64url').toString('hex');
+      const correctUncompressedPublicKeyHex = `04${xHex}${yHex}`;
+
+      console.log(`[/api/auth/did/login] Uncompressed Public Key (hex): ${correctUncompressedPublicKeyHex}`);
+
+      let isSignatureValid = false;
+      try {
+        isSignatureValid = secp256k1Verify(
+          signatureBytes, // r,s signature (raw bytes)
+          messageHash,    // hash of the message (raw bytes)
+          correctUncompressedPublicKeyHex // public key (hex string or raw bytes)
+        );
+      } catch (nobleError) {
+        console.error(`[/api/auth/did/login] Error during noble.verify: `, nobleError);
+        // isSignatureValid remains false
+      }
+
+      console.log(`[/api/auth/did/login] @noble/secp256k1.verify result: ${isSignatureValid}`);
+
+      if (!isSignatureValid) {
+        return res.status(401).json({ message: "Invalid signature (failed @noble/secp256k1 verification)." });
+      }
+
+      // Signature is cryptographically valid.
+      // Now, additionally verify that the JWS payload (the challenge) matches the expected challenge.
+      let decodedPayloadString: string;
+      try {
+        decodedPayloadString = Buffer.from(payloadEncoded, 'base64url').toString('utf8');
+      } catch (e) {
+        console.log(`[/api/auth/did/login] Failed to decode JWS payload for challenge comparison for DID: ${did}`, e);
+        return res.status(400).json({ message: "Invalid JWS payload encoding for challenge check." });
+      }
+
+      let jwsPayloadChallenge: any;
+      try {
+        jwsPayloadChallenge = JSON.parse(decodedPayloadString);
+      } catch (e) {
+        console.log(`[/api/auth/did/login] Failed to JSON.parse decoded JWS payload: '${decodedPayloadString}' for DID: ${did}`, e);
+        return res.status(400).json({ message: "JWS payload is not valid JSON for challenge check." });
+      }
+      
+      console.log(`[/api/auth/did/login] Decoded JWS payload for challenge check:`, jwsPayloadChallenge);
+
+      if (jwsPayloadChallenge !== challenge) {
+        console.log(`[/api/auth/did/login] Challenge mismatch. Expected: '${challenge}', Got from JWS: '${jwsPayloadChallenge}' for DID: ${did}`);
+        return res.status(401).json({ message: "Challenge mismatch." });
+      }
+
+      console.log(`[/api/auth/did/login] Signature and challenge verified for DID: ${did}. Logging in...`);
+      const formattedUser = await formatUser(user);
+
+      req.session.userId = user.id;
+      req.session.username = user.username;
+      req.session.did = user.did ?? null;
+
+      req.session.save((err) => {
+        if (err) {
+          console.error('[/api/auth/did/login] Error saving session:', err);
+          return res.status(500).json({ message: 'Session creation failed' });
+        }
+        console.log(`[/api/auth/did/login] Session created for ${user.username}. Session ID: ${req.sessionID}`);
+        res.cookie('connect.sid', req.sessionID, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+        res.json({
+          message: "Logged in successfully with DID",
+          user: formattedUser,
+          sessionId: req.sessionID
+        });
+      });
+
+    } catch (error) {
+      console.error(`[/api/auth/did/login] Error during DID login for ${did}:`, error);
+      // Distinguish between expected errors (like user not found, which are handled) and unexpected ones.
+      if (!res.headersSent) {
+         handleError(error, res); // Use generic handler for unexpected errors
+      }
     }
   });
 
@@ -939,8 +1141,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.error("Error in /api/translate:", error);
       // Don't fail completely, just return the original text
       res.status(200).json({
-        translatedText: text,
-        sourceLanguage: sourceLanguage || 'auto'
+        translatedText: req.body.text,
+        sourceLanguage: req.body.sourceLanguage || 'auto'
       });
     }
   });
@@ -1135,7 +1337,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let currentUserId = undefined;
       const authHeader = req.headers.authorization;
       const sessionId = authHeader?.split(" ")[1];
-      if (sessionId && req.session) {
+      if (sessionId && req.session && req.session.userId !== undefined) {
         currentUserId = req.session.userId;
         isSubscribed = await storage.isSubscribedToCircuit(currentUserId, circuitId);
       }

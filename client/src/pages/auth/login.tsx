@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
+import { loadPrivateKey, signChallenge } from "@/lib/did";
 
 const loginSchema = z.object({
   username: z.string().min(3, "Username must be at least 3 characters"),
@@ -26,9 +27,16 @@ type LoginFormValues = z.infer<typeof loginSchema>;
 export default function Login() {
   const { t } = useTranslation();
   const { toast } = useToast();
-  const { login } = useAuth();
+  const { login, setAuthState } = useAuth();
   const [, navigate] = useLocation();
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDidSubmitting, setIsDidSubmitting] = useState(false);
+  const [didToLogin, setDidToLogin] = useState("");
+  const [hasPrivateKey, setHasPrivateKey] = useState(false);
+
+  useEffect(() => {
+    setHasPrivateKey(!!loadPrivateKey());
+  }, []);
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -43,7 +51,6 @@ export default function Login() {
       setIsSubmitting(true);
       console.log("Submitting login form with:", values);
       
-      // Use the login function directly from our useAuth hook
       const result = await login(values);
       
       console.log("Login result:", result);
@@ -67,6 +74,49 @@ export default function Login() {
     }
   };
 
+  const handleDidLogin = async () => {
+    if (!didToLogin) {
+      toast({ title: "DID Required", description: "Please enter your DID to log in.", variant: "destructive" });
+      return;
+    }
+    if (!hasPrivateKey) {
+      toast({ title: "Private Key Missing", description: "No private key found in local storage. Cannot sign challenge.", variant: "destructive" });
+      return;
+    }
+
+    setIsDidSubmitting(true);
+    try {
+      const challengeResponse = await apiRequest<{ challenge: string }>("GET", "/api/auth/did/challenge");
+      const challenge = challengeResponse.challenge;
+
+      const jws = await signChallenge(challenge);
+
+      const loginPayload = { did: didToLogin, challenge, jws };
+      const loginResponse = await apiRequest<any>("POST", "/api/auth/did/login", loginPayload);
+
+      if (loginResponse.user && loginResponse.sessionId) {
+         setAuthState(loginResponse.user, loginResponse.sessionId);
+         toast({
+           title: "Welcome back!",
+           description: "You have successfully logged in with your DID.",
+         });
+         navigate("/");
+      } else {
+        throw new Error(loginResponse.message || "DID login failed: Invalid response from server");
+      }
+
+    } catch (error: any) {
+      console.error("DID Login error:", error);
+      toast({
+        title: "DID Login Failed",
+        description: error?.response?.data?.message || error?.message || "An unknown error occurred.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDidSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-neutral-light p-4">
       <Card className="w-full max-w-md">
@@ -79,7 +129,7 @@ export default function Login() {
           <CardTitle className="text-2xl font-bold">UniSphere</CardTitle>
           <CardDescription>Login to connect with the global community</CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-6">
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
@@ -93,7 +143,7 @@ export default function Login() {
                         placeholder="Enter your username" 
                         {...field} 
                         autoComplete="username" 
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || isDidSubmitting}
                       />
                     </FormControl>
                     <FormMessage />
@@ -113,7 +163,7 @@ export default function Login() {
                         placeholder="Enter your password" 
                         {...field} 
                         autoComplete="current-password" 
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || isDidSubmitting}
                       />
                     </FormControl>
                     <FormMessage />
@@ -124,12 +174,50 @@ export default function Login() {
               <Button 
                 type="submit" 
                 className="w-full"
-                disabled={isSubmitting}
+                disabled={isSubmitting || isDidSubmitting}
               >
                 {isSubmitting ? "Logging in..." : t("auth.login")}
               </Button>
             </form>
           </Form>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                Or continue with
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="did">Login with DID</Label>
+              <Input 
+                id="did" 
+                placeholder="Enter your did:ion:..." 
+                value={didToLogin} 
+                onChange={(e) => setDidToLogin(e.target.value)} 
+                disabled={isDidSubmitting || isSubmitting}
+              />
+            </div>
+            <Button 
+              variant="outline" 
+              className="w-full" 
+              onClick={handleDidLogin} 
+              disabled={isDidSubmitting || isSubmitting || !didToLogin || !hasPrivateKey}
+            >
+              {isDidSubmitting ? "Verifying DID..." : "Login with DID"}
+            </Button>
+            {!hasPrivateKey && (
+              <p className="text-xs text-destructive text-center">
+                No private key found in local storage. Generate a DID during registration or import one.
+              </p>
+            )}
+          </div>
+
         </CardContent>
         <CardFooter className="flex flex-col space-y-2">
           <div className="text-sm text-center">

@@ -113,6 +113,30 @@ export async function generateDidAndStoreKey() {
   }
 }
 
+export async function signChallenge(challenge: string): Promise<string> {
+  const privateJwk = loadPrivateKey();
+  if (!privateJwk) {
+    throw new Error("Private key not found. Cannot sign challenge.");
+  }
+
+  if (typeof IonSdk.sign !== 'function') {
+    console.error("[did.ts] IonSdk.sign is not a function. IonSdk keys:", IonSdk ? Object.keys(IonSdk) : "N/A");
+    throw new Error("sign function not found in @decentralized-identity/ion-tools");
+  }
+
+  // Log the x and y from the loaded privateJwk that will be used by IonSdk.sign
+  // These x and y should correspond to the public key stored on the server.
+  console.log('[did.ts] Loaded privateJwk for signing. d (first 10 chars):', privateJwk.d?.substring(0,10));
+  console.log('[did.ts] Loaded privateJwk x for signing:', privateJwk.x);
+  console.log('[did.ts] Loaded privateJwk y for signing:', privateJwk.y);
+  console.log('[did.ts] Challenge to be signed:', challenge);
+
+  // console.log("[did.ts] Signing challenge with privateJwk:", challenge, privateJwk); // Old log
+  const jws = await IonSdk.sign({ payload: challenge, privateJwk });
+  console.log("[did.ts] Challenge signed. JWS:", jws);
+  return jws;
+}
+
 // Export the private key as a JSON string for backup/migration
 export function exportPrivateKey(): string | null {
   const key = loadPrivateKey();

@@ -7,44 +7,58 @@ async function throwIfResNotOk(res: Response) {
   }
 }
 
-export async function apiRequest(
+export async function apiRequest<T = any>(
   method: string,
   url: string,
-  data?: unknown | undefined,
-): Promise<Response> {
+  payload?: unknown | undefined,
+): Promise<T> {
   const sessionId = localStorage.getItem('sessionId');
   const headers: Record<string, string> = {};
   
-  if (data) {
+  if (payload) {
     headers['Content-Type'] = 'application/json';
   }
   
   if (sessionId) {
     headers['Authorization'] = `Bearer ${sessionId}`;
-    console.log(`API Request to ${url} with sessionId: ${sessionId}`);
+    // console.log(`API Request to ${url} with sessionId: ${sessionId.substring(0,8)}...`); // Keep console logs minimal for production
   } else {
-    console.log(`API Request to ${url} without sessionId`);
+    // console.log(`API Request to ${url} without sessionId`);
   }
   
   const res = await fetch(url, {
     method,
     headers,
-    body: data ? JSON.stringify(data) : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
     credentials: "include",
   });
 
-  // Special handling for login success
-  if (url.includes('/api/auth/login') && res.ok) {
-    const responseClone = res.clone();
-    const data = await responseClone.json();
-    if (data.sessionId) {
-      console.log('Login successful, saving sessionId:', data.sessionId);
-      localStorage.setItem('sessionId', data.sessionId);
+  // Special handling for login success to store sessionId
+  if ((url.includes('/api/auth/login') || url.includes('/api/auth/did/login') || url.includes('/api/auth/register')) && res.ok) {
+    const responseClone = res.clone(); // Clone before reading body
+    try {
+      const responseData = await responseClone.json(); // Attempt to parse JSON
+      if (responseData && responseData.sessionId) {
+        console.log('Auth successful, saving sessionId:', responseData.sessionId);
+        localStorage.setItem('sessionId', responseData.sessionId);
+      }
+    } catch (e) {
+      // If .json() fails, it might not be a JSON response, or an empty one. Silently ignore.
+      console.warn(`Could not parse JSON from auth response for ${url}, or sessionId missing.`, e);
     }
   }
 
   await throwIfResNotOk(res);
-  return res;
+  
+  // Check if the response has content before trying to parse JSON
+  const contentType = res.headers.get("content-type");
+  if (contentType && contentType.includes("application/json")) {
+    return res.json() as Promise<T>;
+  }
+  // For non-JSON responses (e.g., 204 No Content), return as is (or handle as needed)
+  // Casting to T might be problematic here if T expects a JSON object and gets null/undefined for 204.
+  // For now, this assumes callers handle non-JSON or empty responses appropriately if T is specific.
+  return res as unknown as Promise<T>; // Or return undefined / null explicitly for non-json
 }
 
 type UnauthorizedBehavior = "returnNull" | "throw";
@@ -108,42 +122,38 @@ export const queryClient = new QueryClient({
     },
     mutations: {
       retry: false,
+      mutationFn: async (variables: any) => {
+        return apiRequest<any>('POST', variables.url, variables.payload);
+      },
     },
   },
 });
 
 // --- Social Circuits API ---
 export async function createCircuit(data: { name: string; description?: string }) {
-  const res = await apiRequest("POST", "/api/circuits", data);
-  return res.json();
+  return apiRequest<any>("POST", "/api/circuits", data);
 }
 
 export async function listCircuits(page = 1, limit = 10) {
-  const res = await apiRequest("GET", `/api/circuits?page=${page}&limit=${limit}`);
-  return res.json();
+  return apiRequest<any>("GET", `/api/circuits?page=${page}&limit=${limit}`);
 }
 
 export async function getCircuitDetails(id: number, page = 1, limit = 10) {
-  const res = await apiRequest("GET", `/api/circuits/${id}?page=${page}&limit=${limit}`);
-  return res.json();
+  return apiRequest<any>("GET", `/api/circuits/${id}?page=${page}&limit=${limit}`);
 }
 
 export async function subscribeToCircuit(id: number) {
-  const res = await apiRequest("POST", `/api/circuits/${id}/subscribe`);
-  return res.json();
+  return apiRequest<any>("POST", `/api/circuits/${id}/subscribe`);
 }
 
 export async function unsubscribeFromCircuit(id: number) {
-  const res = await apiRequest("DELETE", `/api/circuits/${id}/subscribe`);
-  return res;
+  return apiRequest<void>("DELETE", `/api/circuits/${id}/subscribe`);
 }
 
 export async function addPostToCircuit(circuitId: number, postId: number) {
-  const res = await apiRequest("POST", `/api/circuits/${circuitId}/posts`, { postId });
-  return res.json();
+  return apiRequest<any>("POST", `/api/circuits/${circuitId}/posts`, { postId });
 }
 
 export async function removePostFromCircuit(circuitId: number, postId: number) {
-  const res = await apiRequest("DELETE", `/api/circuits/${circuitId}/posts/${postId}`);
-  return res;
+  return apiRequest<void>("DELETE", `/api/circuits/${circuitId}/posts/${postId}`);
 }

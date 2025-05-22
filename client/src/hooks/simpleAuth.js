@@ -158,6 +158,15 @@ export function useAuth() {
       navigate('/login');
     }
   }, [navigate, queryClient]);
+
+  const setAuthState = useCallback((userData, sessionId) => {
+    localStorage.setItem('sessionId', sessionId);
+    setUser(userData);
+    setError(null);
+    queryClient.invalidateQueries(); // Invalidate queries to refetch user-specific data
+    // Optionally navigate here or let the caller handle navigation
+    console.log("Auth state set externally:", userData, sessionId);
+  }, [queryClient]);
   
   return {
     user,
@@ -165,6 +174,7 @@ export function useAuth() {
     error,
     login,
     logout,
+    setAuthState, // Export the new function
     isAuthenticated: !!user
   };
 }

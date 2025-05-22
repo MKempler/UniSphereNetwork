@@ -16,11 +16,12 @@ import CircuitHero from '@/components/CircuitHero';
 import CircuitOverviewCard from '@/components/CircuitOverviewCard';
 
 const fetchCircuitDetail = async (id: string): Promise<CircuitDetail> => {
-  const response = await apiRequest('GET', `/api/circuits/${id}`);
-  if (!response.ok) {
-    throw new Error('Network response was not ok or circuit not found');
+  const circuitDetailData = await apiRequest('GET', `/api/circuits/${id}`);
+  if (typeof circuitDetailData !== 'object' || circuitDetailData === null) {
+    console.error(`Expected object from /api/circuits/${id}, got:`, circuitDetailData);
+    throw new Error('Invalid data format received for circuit details.');
   }
-  return response.json();
+  return circuitDetailData as CircuitDetail;
 };
 
 const PostCard: React.FC<{ post: CircuitPost, isCreator: boolean, onRemovePost?: (postId: number) => void }> = ({ post, isCreator, onRemovePost }) => {
@@ -174,7 +175,7 @@ const CircuitDetailPage: React.FC = () => {
       <main role="main" className="w-full">
         <CircuitHero 
           name={circuit.name || 'Circuit'} 
-          description={circuit.description} 
+          description={circuit.description || undefined}
           subscribed={!!circuit.isSubscribed} 
           onToggle={handleToggleSubscription} 
         />

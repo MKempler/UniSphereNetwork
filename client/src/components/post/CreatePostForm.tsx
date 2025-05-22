@@ -37,11 +37,14 @@ export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFor
     queryKey: ["userSubscribedCircuits"],
     queryFn: async () => {
       // Get all circuits
-      const response = await apiRequest("GET", "/api/circuits/popular");
-      const allCircuits = await response.json();
+      const allCircuitsData = await apiRequest("GET", "/api/circuits/popular");
       
       // Filter to only include circuits the user is subscribed to
-      return allCircuits.filter((circuit: CircuitListItem) => circuit.isSubscribed);
+      if (!Array.isArray(allCircuitsData)) {
+        console.error("Expected array from /api/circuits/popular, got:", allCircuitsData);
+        return [];
+      }
+      return allCircuitsData.filter((circuit: CircuitListItem) => circuit.isSubscribed);
     },
     // Only run this query if user is authenticated
     enabled: !!user?.id
@@ -76,9 +79,7 @@ export default function CreatePostForm({ user, defaultCircuitId }: CreatePostFor
     mutationFn: async (newPost: { content: string; language: string; circuitId?: number }) => {
       return apiRequest("POST", "/api/posts", newPost);
     },
-    onSuccess: async (response) => {
-      const post = await response.json();
-      
+    onSuccess: async (post) => {
       setContent("");
       if (textareaRef.current) {
         textareaRef.current.style.height = 'auto';

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, ReactNode, useEffect } from 'react';
 import { apiRequest } from '@/lib/queryClient';
-import { useAuth } from '../hooks/simpleAuth.js';
+import { useAuth } from '@/hooks/simpleAuth';
 
 type LanguageCode = string; // e.g. 'en', 'es', 'fr', etc.
 
@@ -80,8 +80,7 @@ export function TranslationProvider({ children }: { children: ReactNode }) {
   // Detect language of text
   const detectLanguage = useCallback(async (text: string): Promise<LanguageCode> => {
     try {
-      const response = await apiRequest('POST', '/api/detect-language', { text });
-      const data = await response.json();
+      const data = await apiRequest<DetectLanguageResponse>('POST', '/api/detect-language', { text });
       return data.language;
     } catch (error) {
       console.error('Language detection failed:', error);
@@ -105,12 +104,10 @@ export function TranslationProvider({ children }: { children: ReactNode }) {
     }
     
     try {
-      const response = await apiRequest('POST', '/api/translate', {
+      const data = await apiRequest<TranslateTextResponse>('POST', '/api/translate', {
         text,
         targetLanguage
       });
-      
-      const data = await response.json();
       
       // Update cache
       setTranslationCache(prev => ({

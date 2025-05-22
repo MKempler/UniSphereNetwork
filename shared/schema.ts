@@ -134,7 +134,7 @@ export const notifications = pgTable("notifications", {
 export const relayed_posts = pgTable('relayed_posts', {
   id: serial('id').primaryKey(),
   originalPostId: varchar('original_post_id', { length: 255 }),
-  authorDid: varchar('author_did', { length: 255 }).notNull(),
+  authorDid: text('author_did').notNull(),
   content: text('content').notNull(),
   media: text('media'),
   language: varchar('language', { length: 32 }),

@@ -17,11 +17,17 @@ import SideNav from '@/components/layout/LeftSidebar';
 import RightSidebar from '@/components/layout/RightSidebar';
 
 const fetchPopularCircuits = async (): Promise<CircuitListItem[]> => {
-  const response = await apiRequest('GET', '/api/circuits/popular');
-  if (!response.ok) {
-    throw new Error('Network response was not ok');
+  const popularCircuitsData = await apiRequest('GET', '/api/circuits/popular');
+  // No need to check response.ok or call response.json() here,
+  // apiRequest handles errors and returns parsed data.
+  
+  // It's good practice to ensure the data is an array as expected.
+  if (!Array.isArray(popularCircuitsData)) {
+    console.error("Expected array from /api/circuits/popular, got:", popularCircuitsData);
+    // Optionally throw a more specific error or return a default value like an empty array
+    throw new Error('Invalid data format received for popular circuits.'); 
   }
-  return response.json();
+  return popularCircuitsData;
 };
 
 const FILTERS = [

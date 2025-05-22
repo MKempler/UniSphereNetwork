@@ -14,6 +14,7 @@ export interface User {
   unreadNotifications?: number;
   joined?: string;
   language?: string;
+  did?: string | null;
 }
 
 // Post types

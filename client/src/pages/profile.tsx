@@ -189,6 +189,33 @@ export default function Profile() {
             {profileUser!.bio && (
               <p className="mt-2 text-neutral-700 dark:text-neutral-200">{profileUser!.bio}</p>
             )}
+
+            {/* Display DID if available */}
+            {profileUser!.did && (
+              <div className="mt-3 pt-3 border-t border-neutral-200 dark:border-neutral-700">
+                <p className="text-xs text-neutral-500 dark:text-neutral-400 font-medium mb-1">Decentralized ID (DID)</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm text-neutral-700 dark:text-neutral-200 truncate select-all" title={profileUser!.did}>
+                    {profileUser!.did}
+                  </p>
+                  <Button 
+                    variant="ghost" 
+                    size="icon" 
+                    className="h-7 w-7 text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200"
+                    onClick={() => {
+                      navigator.clipboard.writeText(profileUser!.did!)
+                        .then(() => toast({ title: "DID Copied!", description: "Your DID has been copied to the clipboard." }))
+                        .catch(() => toast({ title: "Copy Failed", description: "Could not copy DID to clipboard.", variant: "destructive" }));
+                    }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <span className="sr-only">Copy DID</span>
+                  </Button>
+                </div>
+              </div>
+            )}
             
             {/* Language preference */}
             {profileUser!.language && (
