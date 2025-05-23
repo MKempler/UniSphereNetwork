@@ -33,6 +33,7 @@ export interface Post {
   isSaved: boolean;
   circuitId?: number;
   circuitName?: string;
+  quotedPost?: Post; // For quote posts - the post being quoted
 }
 
 // Community types
@@ -82,7 +83,7 @@ export interface Comment {
 // Notification types
 export interface Notification {
   id: number;
-  type: 'follow' | 'like' | 'comment' | 'repost' | 'mention';
+  type: 'follow' | 'like' | 'comment' | 'repost' | 'mention' | 'quote';
   isRead: boolean;
   createdAt: string;
   actor: User;

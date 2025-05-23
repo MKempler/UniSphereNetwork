@@ -29,6 +29,7 @@ export const posts = pgTable("posts", {
   language: text("language").notNull().default("en"),
   userId: integer("user_id").notNull(),
   circuitId: integer("circuit_id"),
+  quotedPostId: integer("quoted_post_id"), // For quote posts - references another post
   createdAt: timestamp("created_at").notNull().defaultNow()
 });
 
@@ -179,7 +180,8 @@ export const insertPostSchema = createInsertSchema(posts).pick({
   media: true,
   language: true,
   userId: true,
-  circuitId: true
+  circuitId: true,
+  quotedPostId: true
 });
 
 export const insertFollowSchema = createInsertSchema(follows).pick({

@@ -189,6 +189,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       circuitName = circuit?.name;
     }
 
+    // Handle quoted post data
+    let quotedPost = null;
+    if (post.quotedPostId) {
+      const quotedPostData = await storage.getPost(post.quotedPostId);
+      if (quotedPostData) {
+        // Recursively format the quoted post (but avoid infinite recursion)
+        quotedPost = await formatPost(quotedPostData, currentUserId);
+      }
+    }
+
     return {
       id: post.id,
       content: post.content,
@@ -209,7 +219,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       isReposted,
       isSaved,
       circuitId: post.circuitId,
-      circuitName
+      circuitName,
+      quotedPost
     };
   };
 
@@ -1058,10 +1069,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hasReposted = await storage.hasInteraction(postId, userId, "repost");
       
       if (hasReposted) {
+        // Remove the repost interaction
         await storage.removeInteraction(postId, userId, "repost");
+        
+        // Also delete any repost posts created by this user for this post
+        await db.delete(posts).where(and(
+          eq(posts.userId, userId),
+          eq(posts.quotedPostId, postId),
+          eq(posts.content, "") // Repost posts have empty content
+        ));
+        
         res.status(200).json({ message: "Post un-reposted successfully" });
       } else {
+        // Add the repost interaction
         await storage.addInteraction(postId, userId, "repost");
+        
+        // Create a repost post (empty content, just references the original)
+        const repostPost = await storage.createPost({
+          content: "", // Empty content indicates this is a pure repost
+          userId,
+          language: "en",
+          quotedPostId: postId
+        });
         
         // Create notification if the post author is not the current user
         if (post.userId !== userId) {
@@ -1074,7 +1103,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
         
-        res.status(200).json({ message: "Post reposted successfully" });
+        res.status(200).json({ message: "Post reposted successfully", repostPost });
       }
     } catch (error) {
       handleError(error, res);
@@ -2443,6 +2472,98 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d`;
     return formatDate(date);
   };
+
+  app.post("/api/posts/:id/quote", authMiddleware, async (req, res) => {
+    try {
+      const quotedPostId = parseInt(req.params.id);
+      const { content, circuitId } = req.body;
+      const userId = req.body.currentUserId;
+      
+      // Validate the quoted post exists
+      const quotedPost = await storage.getPost(quotedPostId);
+      if (!quotedPost) {
+        return res.status(404).json({ message: "Post to quote not found" });
+      }
+      
+      // Create the quote post
+      const newPost = await storage.createPost({
+        content: content || "",
+        userId,
+        language: req.body.language || "en",
+        circuitId: circuitId || null,
+        quotedPostId
+      });
+      
+      // Create notification for the quoted post author (if different user)
+      if (quotedPost.userId !== userId) {
+        await storage.createNotification({
+          type: "quote",
+          actorId: userId,
+          recipientId: quotedPost.userId,
+          postId: newPost.id,
+          data: { quotedPostId }
+        });
+      }
+      
+      res.status(201).json({ message: "Quote post created successfully", post: newPost });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.post("/api/posts/:id/repost", authMiddleware, async (req, res) => {
+    try {
+      const postId = parseInt(req.params.id);
+      const userId = req.body.currentUserId;
+      
+      const post = await storage.getPost(postId);
+      if (!post) {
+        return res.status(404).json({ message: "Post not found" });
+      }
+      
+      const hasReposted = await storage.hasInteraction(postId, userId, "repost");
+      
+      if (hasReposted) {
+        // Remove the repost interaction
+        await storage.removeInteraction(postId, userId, "repost");
+        
+        // Also delete any repost posts created by this user for this post
+        await db.delete(posts).where(and(
+          eq(posts.userId, userId),
+          eq(posts.quotedPostId, postId),
+          eq(posts.content, "") // Repost posts have empty content
+        ));
+        
+        res.status(200).json({ message: "Post un-reposted successfully" });
+      } else {
+        // Add the repost interaction
+        await storage.addInteraction(postId, userId, "repost");
+        
+        // Create a repost post (empty content, just references the original)
+        const repostPost = await storage.createPost({
+          content: "", // Empty content indicates this is a pure repost
+          userId,
+          language: "en",
+          quotedPostId: postId
+        });
+        
+        // Create notification if the post author is not the current user
+        if (post.userId !== userId) {
+          await storage.createNotification({
+            type: "repost",
+            actorId: userId,
+            recipientId: post.userId,
+            postId,
+            data: {}
+          });
+        }
+        
+        res.status(200).json({ message: "Post reposted successfully", repostPost });
+      }
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
 
   // Create an HTTP server instance
   const httpServer = createServer(app);

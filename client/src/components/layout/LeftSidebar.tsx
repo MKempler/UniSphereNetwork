@@ -7,7 +7,7 @@ import { useAuth } from "@/hooks/simpleAuth";
 import GlobalSearch from "@/components/GlobalSearch";
 
 const navItems = [
-  { label: "nav.home", icon: Home, href: "/", section: "main" },
+  { label: "nav.home", icon: Home, href: "/feed", section: "main" },
   { label: "nav.explore", icon: Globe, href: "/explore", section: "main" },
   { label: "nav.notifications", icon: Bell, href: "/notifications", section: "main" },
   { label: "nav.messages", icon: MessageCircle, href: "/messages", section: "main" },

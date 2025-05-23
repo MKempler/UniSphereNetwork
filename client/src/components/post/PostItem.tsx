@@ -11,9 +11,11 @@ import TranslatedText from "@/components/common/TranslatedText";
 import { LuGlobe } from "react-icons/lu";
 import { useAuth } from "@/hooks/simpleAuth";
 import { Input } from "@/components/ui/input";
+import QuotePostDialog from "@/components/post/QuotePostDialog";
 
 // Add UI components for menu and modal
 import { Menu, MenuButton, MenuList, MenuItem } from "@/components/ui/menu";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
@@ -24,10 +26,94 @@ interface PostItemProps {
   hideInlineComments?: boolean; // Hide inline comments (for post detail page)
 }
 
+// Component to display quoted posts
+const QuotedPostCard: React.FC<{ quotedPost: Post }> = ({ quotedPost }) => {
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    
+    if (diffInMinutes < 1) {
+      return 'now';
+    } else if (diffInMinutes < 60) {
+      return `${diffInMinutes}m`;
+    } else if (diffInMinutes < 24 * 60) {
+      const hours = Math.floor(diffInMinutes / 60);
+      return `${hours}h`;
+    } else {
+      const days = Math.floor(diffInMinutes / (24 * 60));
+      return `${days}d`;
+    }
+  };
+
+  return (
+    <div className="border border-gray-200 rounded-xl p-4 mt-3 bg-gray-50 hover:bg-gray-100 transition-colors">
+      <Link href={`/post/${quotedPost.id}`}>
+        <a className="block">
+          <div className="flex items-start space-x-3">
+            <Avatar className="w-8 h-8">
+              <AvatarImage 
+                src={quotedPost.author.profileImage || '/default-profile.png'} 
+                alt={quotedPost.author.name} 
+              />
+              <AvatarFallback className="text-xs">
+                {quotedPost.author.name.charAt(0)}
+              </AvatarFallback>
+            </Avatar>
+            
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center space-x-2 mb-1">
+                <p className="font-semibold text-sm text-gray-900">{quotedPost.author.name}</p>
+                <p className="text-sm text-gray-500">@{quotedPost.author.username}</p>
+                <span className="text-gray-400">•</span>
+                <p className="text-sm text-gray-500">{formatDate(quotedPost.createdAt)}</p>
+                {quotedPost.language && (
+                  <span className="text-xs px-2 py-0.5 rounded-md font-medium bg-primary/15 text-primary flex items-center gap-1.5 border border-primary/20">
+                    <LuGlobe className="w-3 h-3" />
+                    {getLanguageTag(quotedPost.language)}
+                  </span>
+                )}
+              </div>
+              
+              <TranslatedText
+                text={quotedPost.content}
+                as="p"
+                className="text-gray-800 text-sm mb-2"
+                showControls={false}
+                originalLanguage={quotedPost.language}
+              />
+              
+              {quotedPost.media && (
+                <img 
+                  src={quotedPost.media} 
+                  alt="Quoted post media" 
+                  className="max-w-full h-auto rounded-lg border mt-2"
+                />
+              )}
+              
+              {/* Interaction counts for quoted post */}
+              <div className="flex items-center space-x-4 mt-2 text-xs text-gray-500">
+                <span>{quotedPost.commentCount} comments</span>
+                <span>{quotedPost.repostCount} reposts</span>
+                <span>{quotedPost.likeCount} likes</span>
+              </div>
+            </div>
+          </div>
+        </a>
+      </Link>
+    </div>
+  );
+};
+
 export default function PostItem({ post, isCircuitPost, circuitName, hideInlineComments = false }: PostItemProps) {
   if (!post.author) {
     return null;
   }
+
+  // Check if this is a repost (either simple repost with empty content, or quote repost with quoted post)
+  const isSimpleRepost = post.content === "" && post.quotedPost;
+  const isQuoteRepost = post.content !== "" && post.quotedPost;
+  const isRepost = isSimpleRepost || isQuoteRepost;
 
   const { t } = useI18nTranslation();
   const { toast } = useToast();
@@ -38,6 +124,7 @@ export default function PostItem({ post, isCircuitPost, circuitName, hideInlineC
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [isCommenting, setIsCommenting] = useState(false);
+  const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
 
   // Fetch first few comments for inline display (only if not hiding them)
   const { data: comments = [] } = useQuery({
@@ -52,7 +139,9 @@ export default function PostItem({ post, isCircuitPost, circuitName, hideInlineC
 
   const likePostMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("POST", `/api/posts/${post.id}/like`, {});
+      // For reposts, like the original post
+      const targetPostId = isRepost && post.quotedPost ? post.quotedPost.id : post.id;
+      return apiRequest("POST", `/api/posts/${targetPostId}/like`, {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
@@ -68,7 +157,9 @@ export default function PostItem({ post, isCircuitPost, circuitName, hideInlineC
 
   const repostMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest("POST", `/api/posts/${post.id}/repost`, {});
+      // For reposts, repost the original post
+      const targetPostId = isRepost && post.quotedPost ? post.quotedPost.id : post.id;
+      return apiRequest("POST", `/api/posts/${targetPostId}/repost`, {});
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
@@ -174,122 +265,163 @@ export default function PostItem({ post, isCircuitPost, circuitName, hideInlineC
 
   return (
     <div className="bg-neutral-50 rounded-2xl shadow p-4 mb-4 hover:shadow-md hover:-translate-y-0.5 transition focus-within:ring-1 ring-primary-500">
-      {/* Circuit Header (if from a circuit) */}
-      {post.circuitId && post.circuitName ? (
-        <div className="flex items-center mb-3">
-          <div className="bg-primary-500 rounded-full w-8 h-8 flex items-center justify-center text-white mr-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          </div>
-          <div>
-            <Link href={`/circuits/${post.circuitId}`}>
-              <a className="text-sm font-medium text-primary-500 hover:underline">
-                Posted in {post.circuitName}
-              </a>
-            </Link>
-          </div>
+      {/* Repost indicator */}
+      {isRepost && (
+        <div className="flex items-center mb-2 text-gray-500 text-sm">
+          <svg 
+            xmlns="http://www.w3.org/2000/svg" 
+            className="h-4 w-4 mr-2" 
+            fill="none" 
+            viewBox="0 0 24 24" 
+            stroke="currentColor"
+          >
+            <path 
+              strokeLinecap="round" 
+              strokeLinejoin="round" 
+              strokeWidth="2" 
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" 
+            />
+          </svg>
+          <span>{post.author.name} reposted</span>
         </div>
-      ) : (
-        <div className="flex items-center mb-3">
-          <div className="bg-neutral-300 rounded-full w-8 h-8 flex items-center justify-center text-white mr-2">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-          </div>
-          <div>
-            <span className="text-sm text-neutral-500">
-              Global post
-            </span>
-          </div>
+      )}
+
+      {/* Circuit badge */}
+      {(isCircuitPost || post.circuitId) && (
+        <div className="flex items-center mb-2 text-sm text-blue-600">
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <circle cx="12" cy="12" r="3" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+            <path d="M12 1v6m0 6v6" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+            <path d="m15.4 6.4 4.2-4.2M15.4 17.6l4.2 4.2M6.6 6.4 2.4 2.2M6.6 17.6l2.4 4.2" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" />
+          </svg>
+          {circuitName || post.circuitName}
         </div>
       )}
       
       {/* Post Header */}
-      <div className="flex justify-between">
-        <div className="flex">
-          <Link href={`/profile/${post.author.username}`}>
-            <a>
-              <Avatar className="w-10 h-10">
-                <AvatarImage src={post.author.profileImage} alt={post.author.name} />
-                <AvatarFallback>{post.author.name.charAt(0)}</AvatarFallback>
-              </Avatar>
-            </a>
-          </Link>
-          <div className="ml-3">
-            <div className="flex items-center mb-1 gap-1">
-              <Link href={`/profile/${post.author.username}`}>
-                <a className="font-semibold text-neutral-dark hover:underline">{post.author.name}</a>
-              </Link>
-              {post.author.isVerified && (
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-primary ml-1">
-                  <path fillRule="evenodd" d="M8.603 3.799A4.49 4.49 0 0112 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 013.498 1.307 4.491 4.491 0 011.307 3.497A4.49 4.49 0 0121.75 12a4.49 4.49 0 01-1.549 3.397 4.491 4.491 0 01-1.307 3.497 4.491 4.491 0 01-3.497 1.307A4.49 4.49 0 0112 21.75a4.49 4.49 0 01-3.397-1.549 4.49 4.49 0 01-3.498-1.306 4.491 4.491 0 01-1.307-3.498A4.49 4.49 0 012.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 011.307-3.497 4.49 4.49 0 013.497-1.307zm7.007 6.387a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" />
-                </svg>
-              )}
-            </div>
-            <div className="flex items-center gap-1" style={{ marginBottom: 4 }}>
-              <p className="text-sm text-neutral-dark opacity-75">@{post.author.username}</p>
-              <span className="mx-1 text-neutral-dark opacity-50">•</span>
-              <p className="text-sm text-neutral-dark opacity-75">{post.createdAt}</p>
-              {post.language && (
-                <span className="ml-2 text-xs px-2 py-0.5 rounded-md font-medium bg-primary/15 text-primary flex items-center gap-1.5 border border-primary/20">
-                  <LuGlobe className="w-3.5 h-3.5" />
-                  {getLanguageTag(post.language)}
-                </span>
-              )}
+      {/* Show header for all posts - for reposts this shows the reposter's info */}
+      {(
+        <div className="flex justify-between">
+          <div className="flex">
+            <Link href={`/profile/${post.author.username}`}>
+              <a>
+                <Avatar className="w-10 h-10">
+                  <AvatarImage 
+                    src={post.author.profileImage} 
+                    alt={post.author.name} 
+                  />
+                  <AvatarFallback>
+                    {post.author.name.charAt(0)}
+                  </AvatarFallback>
+                </Avatar>
+              </a>
+            </Link>
+            <div className="ml-3">
+              <div className="flex items-center mb-1 gap-1">
+                <Link href={`/profile/${post.author.username}`}>
+                  <a className="font-semibold text-neutral-dark hover:underline">
+                    {post.author.name}
+                  </a>
+                </Link>
+                {post.author.isVerified && (
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4 text-primary ml-1">
+                    <path fillRule="evenodd" d="M8.603 3.799A4.49 4.49 0 0112 2.25c1.357 0 2.573.6 3.397 1.549a4.49 4.49 0 013.498 1.307 4.491 4.491 0 011.307 3.497A4.49 4.49 0 0121.75 12a4.49 4.49 0 01-1.549 3.397 4.491 4.491 0 01-1.307 3.497 4.491 4.491 0 01-3.497 1.307A4.49 4.49 0 0112 21.75a4.49 4.49 0 01-3.397-1.549 4.49 4.49 0 01-3.498-1.307 4.491 4.491 0 01-1.307-3.497A4.49 4.49 0 012.25 12c0-1.357.6-2.573 1.549-3.397a4.49 4.49 0 011.307-3.498 4.49 4.49 0 013.497-1.307zm7.007 6.387a.75.75 0 10-1.22-.872l-3.236 4.53L9.53 12.22a.75.75 0 00-1.06 1.06l2.25 2.25a.75.75 0 001.14-.094l3.75-5.25z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </div>
+              <div className="flex items-center gap-1" style={{ marginBottom: 4 }}>
+                <p className="text-sm text-neutral-dark opacity-75">
+                  @{post.author.username}
+                </p>
+                <span className="mx-1 text-neutral-dark opacity-50">•</span>
+                <p className="text-sm text-neutral-dark opacity-75">
+                  {post.createdAt}
+                </p>
+                {post.language && (
+                  <span className="ml-2 text-xs px-2 py-0.5 rounded-md font-medium bg-primary/15 text-primary flex items-center gap-1.5 border border-primary/20">
+                    <LuGlobe className="w-3.5 h-3.5" />
+                    {getLanguageTag(post.language)}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
+          <Menu open={menuOpen} onOpenChange={setMenuOpen}>
+            <MenuButton className="text-neutral-dark p-1 rounded-full hover:bg-neutral-light transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
+              </svg>
+            </MenuButton>
+            <MenuList>
+              {currentUser && currentUser.id === post.author.id && (
+                <MenuItem onClick={() => { setMenuOpen(false); setConfirmOpen(true); }} className="text-red-600">
+                  Delete post
+                </MenuItem>
+              )}
+            </MenuList>
+          </Menu>
         </div>
-        <Menu open={menuOpen} onOpenChange={setMenuOpen}>
-          <MenuButton className="text-neutral-dark p-1 rounded-full hover:bg-neutral-light transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" />
-            </svg>
-          </MenuButton>
-          <MenuList>
-            {currentUser && currentUser.id === post.author.id && (
-              <MenuItem onClick={() => { setMenuOpen(false); setConfirmOpen(true); }} className="text-red-600">
-                Delete post
-              </MenuItem>
-            )}
-          </MenuList>
-        </Menu>
-      </div>
+      )}
       
       {/* Post Content */}
-      <div className="mt-3">
-        <Link href={`/post/${post.id}`}>
-          <a className="block group">
-            <TranslatedText
-              text={post.content}
-              as="p"
-              className="text-neutral-dark mb-3 group-hover:underline cursor-pointer transition"
-              showControls={true}
-              originalLanguage={post.language}
-            />
+      <div className="mb-4">
+        {/* For simple reposts (no content, just reposting), show only the quoted card */}
+        {isSimpleRepost ? (
+          post.quotedPost ? (
+            <QuotedPostCard quotedPost={post.quotedPost} />
+          ) : (
+            <div className="p-4 border border-red-200 rounded-xl bg-red-50">
+              <p className="text-red-600 text-sm">Error: Repost data missing</p>
+            </div>
+          )
+        ) : (
+          /* Regular post content (including quote reposts) */
+          <>
+            <Link href={`/post/${post.id}`}>
+              <a className="block group">
+                <TranslatedText
+                  text={post.content}
+                  as="p"
+                  className="text-neutral-dark mb-3 group-hover:text-neutral-900 transition leading-relaxed"
+                  originalLanguage={post.language}
+                />
+                
+                {post.media && (
+                  <img 
+                    src={post.media} 
+                    alt="Post media" 
+                    className="w-full h-auto rounded-xl object-cover group-hover:opacity-90 transition"
+                  />
+                )}
+              </a>
+            </Link>
             
-            {post.media && (
-              <img 
-                src={post.media} 
-                alt="Post media" 
-                className="w-full h-auto rounded-xl object-cover group-hover:opacity-90 transition"
-              />
+            {/* Render quoted post if it exists (for quote posts with content) */}
+            {post.quotedPost && (
+              <QuotedPostCard quotedPost={post.quotedPost} />
             )}
-          </a>
-        </Link>
+          </>
+        )}
       </div>
       
       {/* Feed divider above actions */}
       <div className="border-b border-neutral-200 mt-3 mb-1" />
       
-      {/* Post Actions */}
-      <div className="flex mt-2 pt-2">
-        <Link href={`/post/${post.id}`}>
-          <a className="flex items-center text-neutral-400 hover:text-blue-500 transition-colors mr-6">
+      {/* Post Interactions */}
+      <div className="flex items-center justify-between mt-4 pt-3 border-t border-neutral-200">
+        <div className="flex items-center space-x-6">
+          <button 
+            className={`flex items-center transition-colors ${
+              (isRepost && post.quotedPost ? post.quotedPost.isLiked : post.isLiked)
+                ? 'text-red-500 hover:text-red-600' 
+                : 'text-neutral-400 hover:text-red-500'
+            }`}
+            onClick={() => likePostMutation.mutate()}
+          >
             <svg 
               xmlns="http://www.w3.org/2000/svg" 
               className="h-5 w-5 mr-1.5" 
-              fill="none" 
+              fill={(isRepost && post.quotedPost ? post.quotedPost.isLiked : post.isLiked) ? "currentColor" : "none"} 
               viewBox="0 0 24 24" 
               stroke="currentColor"
               strokeWidth="2"
@@ -297,60 +429,95 @@ export default function PostItem({ post, isCircuitPost, circuitName, hideInlineC
               <path 
                 strokeLinecap="round" 
                 strokeLinejoin="round" 
-                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" 
+                d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" 
               />
             </svg>
-            <span className="text-sm">{post.commentCount}</span>
-          </a>
-        </Link>
-        <button 
-          className={`flex items-center transition-colors mr-6 ${
-            post.isReposted 
-              ? 'text-green-500 hover:text-green-600' 
-              : 'text-neutral-400 hover:text-green-500'
-          }`}
-          onClick={() => repostMutation.mutate()}
-        >
-          <svg 
-            xmlns="http://www.w3.org/2000/svg" 
-            className="h-5 w-5 mr-1.5" 
-            fill={post.isReposted ? "currentColor" : "none"} 
-            viewBox="0 0 24 24" 
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" 
-            />
-          </svg>
-          <span className="text-sm">{post.repostCount}</span>
-        </button>
-        <button 
-          className={`flex items-center transition-colors mr-6 ${
-            post.isLiked 
-              ? 'text-red-500 hover:text-red-600' 
-              : 'text-neutral-400 hover:text-red-500'
-          }`}
-          onClick={() => likePostMutation.mutate()}
-        >
-          <svg 
-            xmlns="http://www.w3.org/2000/svg" 
-            className="h-5 w-5 mr-1.5" 
-            fill={post.isLiked ? "currentColor" : "none"} 
-            viewBox="0 0 24 24" 
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <path 
-              strokeLinecap="round" 
-              strokeLinejoin="round" 
-              d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" 
-            />
-          </svg>
-          <span className="text-sm">{post.likeCount}</span>
-        </button>
+            <span className="text-sm">{isRepost && post.quotedPost ? post.quotedPost.likeCount : post.likeCount}</span>
+          </button>
+
+          <Link href={`/post/${isRepost && post.quotedPost ? post.quotedPost.id : post.id}`}>
+            <a className="flex items-center text-neutral-400 hover:text-blue-500 transition-colors mr-6">
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                className="h-5 w-5 mr-1.5" 
+                fill="none" 
+                viewBox="0 0 24 24" 
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" 
+                />
+              </svg>
+              <span className="text-sm">{isRepost && post.quotedPost ? post.quotedPost.commentCount : post.commentCount}</span>
+            </a>
+          </Link>
+        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button 
+              className={`flex items-center transition-colors mr-6 ${
+                post.isReposted 
+                  ? 'text-green-500 hover:text-green-600' 
+                  : 'text-neutral-400 hover:text-green-500'
+              }`}
+            >
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                className="h-5 w-5 mr-1.5" 
+                fill={post.isReposted ? "currentColor" : "none"} 
+                viewBox="0 0 24 24" 
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" 
+                />
+              </svg>
+              <span className="text-sm">{post.repostCount}</span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => repostMutation.mutate()}>
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                className="h-4 w-4 mr-2" 
+                fill="none" 
+                viewBox="0 0 24 24" 
+                stroke="currentColor"
+              >
+                <path 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  strokeWidth="2" 
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" 
+                />
+              </svg>
+              {post.isReposted ? 'Undo Repost' : 'Repost'}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => setQuoteDialogOpen(true)}>
+              <svg 
+                xmlns="http://www.w3.org/2000/svg" 
+                className="h-4 w-4 mr-2" 
+                fill="none" 
+                viewBox="0 0 24 24" 
+                stroke="currentColor"
+              >
+                <path 
+                  strokeLinecap="round" 
+                  strokeLinejoin="round" 
+                  strokeWidth="2" 
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" 
+                />
+              </svg>
+              Quote Post
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <button 
           className={`flex items-center transition-colors ${
             post.isSaved 
@@ -561,6 +728,13 @@ export default function PostItem({ post, isCircuitPost, circuitName, hideInlineC
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Quote Post Dialog */}
+      <QuotePostDialog 
+        post={isRepost && post.quotedPost ? post.quotedPost : post}
+        open={quoteDialogOpen}
+        onOpenChange={setQuoteDialogOpen}
+      />
     </div>
   );
 }

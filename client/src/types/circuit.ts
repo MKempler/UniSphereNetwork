@@ -41,6 +41,7 @@ export interface CircuitPost {
   isSaved: boolean;
   circuitId: number | null;
   circuitName: string | null;
+  quotedPost?: CircuitPost;
 }
 
 export interface CircuitDetail extends CircuitListItem {

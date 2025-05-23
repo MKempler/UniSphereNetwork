@@ -495,6 +495,7 @@ export class DatabaseStorage implements IStorage {
           ...insertPost,
           media: insertPost.media || null,
           circuitId: insertPost.circuitId || null,
+          quotedPostId: insertPost.quotedPostId || null,
           createdAt: new Date()
         })
         .returning();
