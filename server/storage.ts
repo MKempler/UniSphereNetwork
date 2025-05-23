@@ -18,7 +18,7 @@ import {
   communities, communityMembers, trends, notifications
 } from "../shared/schema.ts";
 import { db } from "./db.ts";
-import { eq, and, sql, inArray } from "drizzle-orm";
+import { eq, and, sql, inArray, isNotNull } from "drizzle-orm";
 import { translateText, detectLanguage } from './translation.ts';
 
 export interface IStorage {
@@ -426,7 +426,7 @@ export class DatabaseStorage implements IStorage {
       return await db
         .select()
         .from(posts)
-        .where(sql`${posts.userId} IN (${followingIds.join(',')})`)
+        .where(inArray(posts.userId, followingIds))
         .orderBy(sql`${posts.createdAt} DESC`)
         .limit(limit)
         .offset(offset);
@@ -447,7 +447,10 @@ export class DatabaseStorage implements IStorage {
       return await db
         .select()
         .from(posts)
-        .where(sql`${posts.circuitId} IN (${circuitIds.join(',')})`)
+        .where(and(
+          isNotNull(posts.circuitId),
+          inArray(posts.circuitId, circuitIds)
+        ))
         .orderBy(sql`${posts.createdAt} DESC`)
         .limit(limit)
         .offset(offset);
@@ -522,7 +525,7 @@ export class DatabaseStorage implements IStorage {
           query = db
             .select({ count: sql`count(*)` })
             .from(posts)
-            .where(sql`${posts.userId} IN (${followingIds.join(',')})`);
+            .where(inArray(posts.userId, followingIds));
           break;
         case 'circuit':
           if (!userId) return 0;
@@ -531,7 +534,10 @@ export class DatabaseStorage implements IStorage {
           query = db
             .select({ count: sql`count(*)` })
             .from(posts)
-            .where(sql`${posts.circuitId} IN (${circuitIds.join(',')})`);
+            .where(and(
+              isNotNull(posts.circuitId),
+              inArray(posts.circuitId, circuitIds)
+            ));
           break;
         case 'user':
           if (!userId) return 0;
@@ -628,7 +634,15 @@ export class DatabaseStorage implements IStorage {
   // Circuit operations
   async getCircuit(id: number): Promise<Circuit | undefined> {
     try {
+      console.log(`[storage.getCircuit] Called with id: ${id}, type: ${typeof id}, isNaN: ${isNaN(id)}`);
+      
+      if (isNaN(id) || id === null || id === undefined) {
+        console.error(`[storage.getCircuit] Invalid circuit ID received: ${id}`);
+        throw new Error(`Invalid circuit ID: ${id}`);
+      }
+      
       const [circuit] = await db.select().from(circuits).where(eq(circuits.id, id));
+      console.log(`[storage.getCircuit] Query result for id ${id}:`, circuit ? 'found' : 'not found');
       return circuit;
     } catch (error) {
       console.error("Error in getCircuit:", error);
@@ -759,11 +773,21 @@ export class DatabaseStorage implements IStorage {
   
   async getCircuitSubscriberCount(circuitId: number): Promise<number> {
     try {
+      console.log(`[storage.getCircuitSubscriberCount] Called with circuitId: ${circuitId}, type: ${typeof circuitId}, isNaN: ${isNaN(circuitId)}`);
+      
+      if (isNaN(circuitId) || circuitId === null || circuitId === undefined) {
+        console.error(`[storage.getCircuitSubscriberCount] Invalid circuit ID received: ${circuitId}`);
+        throw new Error(`Invalid circuit ID for subscriber count: ${circuitId}`);
+      }
+      
       const result = await db
         .select({ count: sql`count(*)` })
         .from(circuit_subscriptions)
         .where(eq(circuit_subscriptions.circuitId, circuitId));
-      return Number(result[0]?.count || 0);
+      
+      const count = Number(result[0]?.count || 0);
+      console.log(`[storage.getCircuitSubscriberCount] Circuit ${circuitId} has ${count} subscribers`);
+      return count;
     } catch (error) {
       console.error("Error in getCircuitSubscriberCount:", error);
       return 0;
@@ -1442,6 +1466,7 @@ export class DatabaseStorage implements IStorage {
   async getPopularPosts(timeframe: '24h' | '7d' | '30d' = '24h', limit = 20): Promise<Post[]> {
     try {
       let timeThreshold = new Date();
+      
       switch (timeframe) {
         case '24h':
           timeThreshold.setHours(timeThreshold.getHours() - 24);

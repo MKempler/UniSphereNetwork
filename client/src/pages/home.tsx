@@ -7,6 +7,7 @@ import RightSidebar from "@/components/layout/RightSidebar";
 import CreatePostForm from "@/components/post/CreatePostForm";
 import FeedSelector from "@/components/post/FeedSelector";
 import PostItem from "@/components/post/PostItem";
+import CircuitsFeed from "@/components/circuits/CircuitsFeed";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Post, User } from "@/types";
@@ -26,10 +27,10 @@ export default function Home() {
 
   const {
     data,
-    isLoading: isLoadingPosts,
-    isFetchingNextPage,
+    isLoading: isLoadingPosts = false,
+    isFetchingNextPage = false,
     fetchNextPage,
-    hasNextPage,
+    hasNextPage = false,
   } = useInfiniteQuery<{ posts: Post[]; page: number; totalPages: number }, Error>({
     queryKey: ["/api/posts", feedType],
     queryFn: async ({ pageParam = 1 }) => {
@@ -44,6 +45,7 @@ export default function Home() {
       return undefined;
     },
     initialPageParam: 1,
+    enabled: feedType !== "circuits",
   });
 
   // Intersection Observer for infinite scroll
@@ -57,7 +59,7 @@ export default function Home() {
   }, [inView, hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // Debug: log posts array
-  if (data && data.pages) {
+  if (data?.pages) {
     // Flatten all posts from all pages
     const allPosts = data.pages.flatMap((page) => (page as { posts: Post[] }).posts);
     console.log('DEBUG: Posts to render:', allPosts);
@@ -85,7 +87,9 @@ export default function Home() {
         )}
         <FeedSelector onFeedChange={setFeedType} />
         {/* Feed content */}
-        {isLoadingPosts ? (
+        {feedType === "circuits" ? (
+          <CircuitsFeed />
+        ) : isLoadingPosts ? (
           Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="bg-neutral-50 rounded-2xl shadow p-4 mb-4">
               <div className="flex items-center mb-3">
@@ -100,7 +104,7 @@ export default function Home() {
               <Skeleton className="h-4 w-1/2" />
             </div>
           ))
-        ) : data && data.pages && data.pages.flatMap((page) => (page as { posts: Post[] }).posts).length > 0 ? (
+        ) : data?.pages && data.pages.flatMap((page) => (page as { posts: Post[] }).posts).length > 0 ? (
           <>
             {data.pages.flatMap((page) => (page as { posts: Post[] }).posts).map((post) => (
               <PostItem key={post.id} post={post} />

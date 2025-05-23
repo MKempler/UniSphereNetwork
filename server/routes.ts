@@ -28,6 +28,7 @@ import session from 'express-session';
 import { RedisStore } from 'connect-redis';
 import { verify as secp256k1Verify } from '@noble/secp256k1';
 import { sha256 as nobleSha256 } from '@noble/hashes/sha256';
+import { circuit_subscriptions } from "../shared/schema.ts";
 
 declare module "express-session" {
   interface SessionData {
@@ -2001,10 +2002,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get user's subscribed circuits - MUST come before /api/circuits/:id
+  app.get('/api/circuits/my-subscriptions', authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      
+      console.log(`[my-subscriptions] Starting request for user ${userId}`);
+      
+      // Get user's circuit subscriptions
+      const subscriptions = await db.select()
+        .from(circuit_subscriptions)
+        .where(eq(circuit_subscriptions.userId, userId));
+      
+      console.log(`[my-subscriptions] Found ${subscriptions.length} subscriptions:`, subscriptions);
+      
+      if (subscriptions.length === 0) {
+        return res.status(200).json([]);
+      }
+      
+      const circuitIds = subscriptions.map(sub => sub.circuitId);
+      console.log(`[my-subscriptions] Circuit IDs:`, circuitIds);
+      
+      // Validate that all circuitIds are valid numbers
+      const invalidIds = circuitIds.filter(id => isNaN(id) || id === null || id === undefined);
+      if (invalidIds.length > 0) {
+        console.error(`[my-subscriptions] Found invalid circuit IDs:`, invalidIds);
+        return res.status(500).json({ message: 'Invalid circuit subscription data found' });
+      }
+      
+      // Get circuit details with stats
+      const circuitsData = await db.select()
+        .from(circuits)
+        .where(inArray(circuits.id, circuitIds));
+      
+      console.log(`[my-subscriptions] Found ${circuitsData.length} circuits in database`);
+      
+      // Format circuits with subscriber count and creator info
+      const formattedCircuits = await Promise.all(
+        circuitsData.map(async (circuit: any) => {
+          console.log(`[my-subscriptions] Processing circuit ${circuit.id}`);
+          
+          // Validate circuit.id before passing to storage methods
+          if (isNaN(circuit.id) || circuit.id === null || circuit.id === undefined) {
+            console.error(`[my-subscriptions] Invalid circuit ID found in circuit data:`, circuit);
+            throw new Error(`Invalid circuit ID: ${circuit.id}`);
+          }
+          
+          const subscriberCount = await storage.getCircuitSubscriberCount(circuit.id);
+          
+          // Get creator info
+          let creatorName = 'Unknown User';
+          let creatorProfileImage = '/default-profile.png';
+          if (circuit.creatorId && !isNaN(circuit.creatorId)) {
+            const creator = await storage.getUser(circuit.creatorId);
+            if (creator) {
+              creatorName = creator.name || creator.username;
+              creatorProfileImage = creator.profileImage;
+            }
+          }
+          
+          return {
+            ...circuit,
+            subscriberCount,
+            isSubscribed: true, // All circuits in this response are subscribed to
+            creatorName,
+            creatorProfileImage,
+          };
+        })
+      );
+      
+      // Sort by subscription date (most recently joined first)
+      const sortedCircuits = formattedCircuits.sort((a: any, b: any) => {
+        const subA = subscriptions.find(sub => sub.circuitId === a.id);
+        const subB = subscriptions.find(sub => sub.circuitId === b.id);
+        if (!subA || !subB) return 0;
+        return new Date(subB.subscribedAt).getTime() - new Date(subA.subscribedAt).getTime();
+      });
+      
+      console.log(`[my-subscriptions] Successfully formatted ${sortedCircuits.length} circuits`);
+      res.status(200).json(sortedCircuits);
+    } catch (error) {
+      console.error('[my-subscriptions] Error:', error);
+      handleError(error, res);
+    }
+  });
+
   // Get circuit details and posts (paginated)
   app.get('/api/circuits/:id', async (req, res) => {
     try {
+      console.log(`[GET /api/circuits/:id] Raw id param: "${req.params.id}", type: ${typeof req.params.id}`);
+      
       const circuitId = parseInt(req.params.id);
+      console.log(`[GET /api/circuits/:id] Parsed circuitId: ${circuitId}, isNaN: ${isNaN(circuitId)}`);
+      
+      if (isNaN(circuitId)) {
+        console.error(`[GET /api/circuits/:id] Invalid circuit ID parameter: "${req.params.id}"`);
+        return res.status(400).json({ message: 'Invalid circuit ID parameter' });
+      }
+      
       const page = parseInt(req.query.page as string || '1');
       const limit = parseInt(req.query.limit as string || '10');
       const circuit = await storage.getCircuit(circuitId);
