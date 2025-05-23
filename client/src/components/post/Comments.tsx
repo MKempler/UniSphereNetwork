@@ -13,6 +13,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import TranslatedText from "@/components/common/TranslatedText";
+import { getLanguageTag } from "@/lib/translation";
+import { LuGlobe } from "react-icons/lu";
 
 interface CommentsProps {
   postId: number;
@@ -90,6 +93,12 @@ const CommentItem = ({ comment, postId, onReply, replyingTo }: CommentItemProps)
                 <span className="text-xs text-neutral-500">@{comment.author.username}</span>
                 <span className="text-xs text-neutral-500">•</span>
                 <span className="text-xs text-neutral-500">{comment.createdAt}</span>
+                {comment.language && comment.language.toLowerCase() !== 'en' && (
+                  <span className="ml-2 text-xs px-1.5 py-0.5 rounded-md font-medium bg-blue-100 text-blue-600 flex items-center gap-1 border border-blue-200">
+                    <LuGlobe className="w-3 h-3" />
+                    {getLanguageTag(comment.language)}
+                  </span>
+                )}
               </div>
               
               {isOwner && (
@@ -112,7 +121,13 @@ const CommentItem = ({ comment, postId, onReply, replyingTo }: CommentItemProps)
               )}
             </div>
             
-            <p className="text-sm mt-1">{comment.content}</p>
+            <div className="text-sm mt-1">
+              <TranslatedText
+                text={comment.content}
+                originalLanguage={comment.language}
+                showControls={true}
+              />
+            </div>
           </div>
           
           <div className="flex items-center space-x-4 mt-1 ml-1">

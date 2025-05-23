@@ -217,9 +217,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     const followers = await storage.getFollowerCount(user.id);
     const following = await storage.getFollowingCount(user.id);
     let isFollowing = false;
+    let unreadNotifications = 0;
     
     if (currentUserId && currentUserId !== user.id) {
       isFollowing = await storage.isFollowing(currentUserId, user.id);
+    }
+    
+    // Get unread notification count for the current user
+    if (currentUserId && currentUserId === user.id) {
+      unreadNotifications = await storage.getUnreadNotificationCount(user.id);
     }
     
     return {
@@ -227,6 +233,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       followers,
       following,
       isFollowing,
+      unreadNotifications,
       did: user.did,
       publicKey: user.publicKey
     };
@@ -714,8 +721,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "User not found" });
       }
       
-      const currentUserId = req.headers.authorization ? 
-        req.session?.userId : undefined;
+      const currentUserId = req.session?.userId || req.body.currentUserId;
       
       res.status(200).json(await formatUser(user, currentUserId));
     } catch (error) {
@@ -730,8 +736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const tab = req.query.activeTab || "posts";
       const posts = await storage.getUserPosts(userId);
       
-      const currentUserId = req.headers.authorization ? 
-        req.session?.userId : undefined;
+      const currentUserId = req.session?.userId || req.body.currentUserId;
       
       const formattedPosts = await Promise.all(
         posts.map(post => formatPost(post, currentUserId))
@@ -804,16 +809,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Suggested Users
   app.get("/api/users/suggested", async (req, res) => {
     try {
-      const currentUserId = req.headers.authorization ? 
-        req.session?.userId : undefined;
+      const { limit = 10 } = req.query;
+      const currentUserId = req.session?.userId || req.body.currentUserId;
       
-      let suggestedUsers = await storage.getSuggestedUsers(currentUserId);
-      
-      const formattedUsers = await Promise.all(
-        suggestedUsers.map(user => formatUser(user, currentUserId))
-      );
-      
-      res.status(200).json(formattedUsers);
+      if (currentUserId) {
+        // Use enhanced recommendations for authenticated users
+        const users = await storage.getRecommendedUsers(currentUserId, parseInt(limit as string));
+        const formattedUsers = await Promise.all(
+          users.map(user => formatUser(user, currentUserId))
+        );
+        res.status(200).json(formattedUsers);
+      } else {
+        // Use basic suggestions for anonymous users
+        const users = await storage.getSuggestedUsers(undefined);
+        const formattedUsers = await Promise.all(
+          users.slice(0, parseInt(limit as string)).map(user => formatUser(user))
+        );
+        res.status(200).json(formattedUsers);
+      }
     } catch (error) {
       handleError(error, res);
     }
@@ -829,8 +842,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Post not found" });
       }
       
-      const currentUserId = req.headers.authorization ? 
-        req.session?.userId : undefined;
+      const currentUserId = req.session?.userId || req.body.currentUserId;
       
       const formattedPost = await formatPost(post, currentUserId);
       
@@ -1098,8 +1110,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const postId = parseInt(req.params.id);
       const comments = await storage.getPostComments(postId);
       
-      const currentUserId = req.headers.authorization ? 
-        req.session?.userId : undefined;
+      const currentUserId = req.session?.userId || req.body.currentUserId;
       
       // Format comments with author info and like status
       const formattedComments = await Promise.all(
@@ -1541,6 +1552,132 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Enhanced trending endpoints
+  app.get("/api/trends/hashtags", async (req, res) => {
+    try {
+      const { timeframe = '24h', limit = 10 } = req.query;
+      const trends = await storage.getTrendingHashtags(
+        parseInt(limit as string), 
+        timeframe as '24h' | '7d' | '30d'
+      );
+      res.status(200).json(trends);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.get("/api/trends/topics", async (req, res) => {
+    try {
+      const { language, region, limit = 10 } = req.query;
+      const trends = await storage.getTrendingTopics(
+        language as string, 
+        region as string, 
+        parseInt(limit as string)
+      );
+      res.status(200).json(trends);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Global search endpoint
+  app.get("/api/search/global", async (req, res) => {
+    try {
+      const { q, type, limit = 20 } = req.query;
+      if (!q) {
+        return res.status(400).json({ message: "Query parameter 'q' is required" });
+      }
+      
+      const results = await storage.globalSearch(
+        q as string, 
+        type as 'posts' | 'users' | 'circuits' | undefined,
+        parseInt(limit as string)
+      );
+      
+      // Format posts with author information
+      const currentUserId = req.session?.userId;
+      const formattedPosts = await Promise.all(
+        results.posts.map(post => formatPost(post, currentUserId))
+      );
+      
+      // Format users
+      const formattedUsers = await Promise.all(
+        results.users.map(user => formatUser(user, currentUserId))
+      );
+      
+      // Return formatted results
+      res.status(200).json({
+        posts: formattedPosts.filter(Boolean),
+        users: formattedUsers,
+        circuits: results.circuits
+      });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Discovery endpoints
+  app.get("/api/discover/users", authMiddleware, async (req, res) => {
+    try {
+      const { limit = 10 } = req.query;
+      const currentUserId = req.session?.userId || req.body.currentUserId;
+      
+      if (!currentUserId) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+      
+      const users = await storage.getRecommendedUsers(currentUserId, parseInt(limit as string));
+      const formattedUsers = await Promise.all(
+        users.map(user => formatUser(user, currentUserId))
+      );
+      
+      res.status(200).json(formattedUsers);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.get("/api/discover/posts", async (req, res) => {
+    try {
+      const { timeframe = '24h', limit = 20 } = req.query;
+      const posts = await storage.getPopularPosts(
+        timeframe as '24h' | '7d' | '30d',
+        parseInt(limit as string)
+      );
+      
+      const currentUserId = req.session?.userId || req.body.currentUserId;
+      const formattedPosts = await Promise.all(
+        posts.map(post => formatPost(post, currentUserId))
+      );
+      
+      res.status(200).json(formattedPosts.filter(Boolean));
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.get("/api/posts/hashtag/:hashtag", async (req, res) => {
+    try {
+      const { hashtag } = req.params;
+      const { page = 1, limit = 20 } = req.query;
+      
+      const posts = await storage.getPostsByHashtag(
+        hashtag,
+        parseInt(page as string),
+        parseInt(limit as string)
+      );
+      
+      const currentUserId = req.session?.userId || req.body.currentUserId;
+      const formattedPosts = await Promise.all(
+        posts.map(post => formatPost(post, currentUserId))
+      );
+      
+      res.status(200).json(formattedPosts.filter(Boolean));
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
   // Image upload endpoint
   app.post("/api/upload/image", upload.single('image'), async (req, res) => {
     try {
@@ -1942,6 +2079,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.body.currentUserId;
       const circuitId = parseInt(req.params.id);
       const subscription = await storage.subscribeToCircuit(userId, circuitId);
+      
+      // Get circuit info to notify the creator
+      const circuit = await storage.getCircuit(circuitId);
+      if (circuit && circuit.creatorId !== userId) {
+        await storage.createNotification({
+          type: 'circuit_join',
+          actorId: userId,
+          recipientId: circuit.creatorId,
+          data: { circuitId, circuitName: circuit.name }
+        });
+      }
+      
       res.status(201).json(subscription);
     } catch (error) {
       handleError(error, res);
@@ -2111,6 +2260,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
       handleError(error, res);
     }
   });
+
+  // Notifications endpoints
+  app.get("/api/notifications", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const notifications = await storage.getUserNotifications(userId);
+      
+      // Format notifications with actor info
+      const formattedNotifications = (await Promise.all(
+        notifications.map(async (notification) => {
+          const actor = await storage.getUser(notification.actorId);
+          let post = null;
+          if (notification.postId) {
+            post = await storage.getPost(notification.postId);
+          }
+          
+          // Skip notification if actor doesn't exist
+          if (!actor) {
+            return null;
+          }
+          
+          return {
+            ...notification,
+            actor: {
+              id: actor.id,
+              username: actor.username,
+              name: actor.name,
+              profileImage: actor.profileImage,
+              isVerified: actor.isVerified
+            },
+            post: post ? {
+              id: post.id,
+              content: post.content.substring(0, 100) + (post.content.length > 100 ? '...' : ''),
+              createdAt: formatDate(post.createdAt)
+            } : null,
+            createdAt: formatDate(notification.createdAt),
+            timeAgo: getTimeAgo(notification.createdAt)
+          };
+        })
+      )).filter(notification => notification !== null);
+      
+      res.status(200).json(formattedNotifications);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.patch("/api/notifications/:id/read", authMiddleware, async (req, res) => {
+    try {
+      const notificationId = parseInt(req.params.id);
+      const userId = req.body.currentUserId;
+      
+      // Make sure user owns this notification before marking it read
+      const notification = await storage.getUserNotifications(userId);
+      const userNotification = notification.find(n => n.id === notificationId);
+      
+      if (!userNotification) {
+        return res.status(404).json({ message: "Notification not found" });
+      }
+      
+      await storage.markNotificationAsRead(notificationId);
+      res.status(200).json({ message: "Notification marked as read" });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.patch("/api/notifications/read-all", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      await storage.markAllNotificationsAsRead(userId);
+      res.status(200).json({ message: "All notifications marked as read" });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Helper function for time ago formatting
+  const getTimeAgo = (date: Date): string => {
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    
+    if (diffInSeconds < 60) return 'just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h`;
+    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d`;
+    return formatDate(date);
+  };
 
   // Create an HTTP server instance
   const httpServer = createServer(app);

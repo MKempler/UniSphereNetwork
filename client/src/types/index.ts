@@ -74,6 +74,7 @@ export interface Comment {
   author: User;
   likeCount: number;
   isLiked: boolean;
+  language?: string;
   parentId?: number | null;
   replies?: Comment[];
 }

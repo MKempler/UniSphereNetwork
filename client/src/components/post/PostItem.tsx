@@ -385,25 +385,32 @@ export default function PostItem({ post, isCircuitPost, circuitName, hideInlineC
               <div key={comment.id} className="flex items-start space-x-2">
                 <Link href={`/profile/${comment.author.username}`}>
                   <a>
-                    <Avatar className="w-6 h-6">
+                    <Avatar className="w-7 h-7">
                       <AvatarImage src={comment.author.profileImage} alt={comment.author.name} />
-                      <AvatarFallback className="text-xs">{comment.author.name.charAt(0)}</AvatarFallback>
+                      <AvatarFallback>{comment.author.name.charAt(0)}</AvatarFallback>
                     </Avatar>
                   </a>
                 </Link>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center space-x-1 mb-0.5">
-                    <Link href={`/profile/${comment.author.username}`}>
-                      <a className="text-sm font-medium text-neutral-800 hover:underline truncate">
-                        {comment.author.name}
-                      </a>
-                    </Link>
-                    <span className="text-xs text-neutral-500">•</span>
-                    <span className="text-xs text-neutral-500">{comment.createdAt}</span>
+                  <div className="bg-neutral-100 dark:bg-dark-bg-hover rounded-lg px-3 py-1.5">
+                    <div className="flex items-center space-x-2">
+                      <Link href={`/profile/${comment.author.username}`} className="font-semibold text-xs hover:underline">{comment.author.name}</Link>
+                      <span className="text-xs text-neutral-500 dark:text-neutral-400">• {comment.createdAt}</span>
+                      {comment.language && comment.language.toLowerCase() !== 'en' && (
+                        <span className="ml-1 text-xs px-1 py-0.5 rounded-md font-medium bg-blue-100 text-blue-600 flex items-center gap-0.5 border border-blue-200">
+                          <LuGlobe className="w-2.5 h-2.5" />
+                          {getLanguageTag(comment.language)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs mt-0.5">
+                      <TranslatedText
+                        text={comment.content}
+                        originalLanguage={comment.language}
+                        showControls={true}
+                      />
+                    </div>
                   </div>
-                  <p className="text-sm text-neutral-700 leading-relaxed">
-                    {comment.content}
-                  </p>
                   <div className="flex items-center mt-1.5 space-x-4">
                     {/* Like button */}
                     <button 

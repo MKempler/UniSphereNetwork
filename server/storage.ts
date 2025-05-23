@@ -93,12 +93,27 @@ export interface IStorage {
   // Trends
   getTrends(): Promise<Trend[]>;
   updateTrend(tag: string, category: string): Promise<Trend>;
+  // Enhanced trending methods
+  getTrendingHashtags(limit?: number, timeframe?: '24h' | '7d' | '30d'): Promise<Trend[]>;
+  getTrendingTopics(language?: string, region?: string, limit?: number): Promise<Trend[]>;
+  searchTrends(query: string): Promise<Trend[]>;
+
+  // Discovery and search methods
+  globalSearch(query: string, type?: 'posts' | 'users' | 'circuits', limit?: number): Promise<{
+    posts: Post[];
+    users: User[];
+    circuits: Circuit[];
+  }>;
+  getRecommendedUsers(currentUserId: number, limit?: number): Promise<User[]>;
+  getPopularPosts(timeframe?: '24h' | '7d' | '30d', limit?: number): Promise<Post[]>;
+  getPostsByHashtag(hashtag: string, page?: number, limit?: number): Promise<Post[]>;
 
   // Notifications
   createNotification(notification: InsertNotification): Promise<Notification>;
   getUserNotifications(userId: number): Promise<Notification[]>;
   markNotificationAsRead(id: number): Promise<void>;
   markAllNotificationsAsRead(userId: number): Promise<void>;
+  getUnreadNotificationCount(userId: number): Promise<number>;
 
   // Remote follow operations
   getFollow(followerId: number, remoteDid: string): Promise<Follow | undefined>;
@@ -1111,6 +1126,20 @@ export class DatabaseStorage implements IStorage {
       throw error;
     }
   }
+  
+  async getUnreadNotificationCount(userId: number): Promise<number> {
+    try {
+      const result = await db
+        .select({ count: sql`count(*)` })
+        .from(notifications)
+        .where(and(eq(notifications.recipientId, userId), eq(notifications.isRead, false)));
+      
+      return Number(result[0]?.count || 0);
+    } catch (error) {
+      console.error("Error in getUnreadNotificationCount:", error);
+      return 0;
+    }
+  }
 
   async getFollow(followerId: number, remoteDid: string): Promise<Follow | undefined> {
     try {
@@ -1235,10 +1264,12 @@ export class DatabaseStorage implements IStorage {
   // Comment operations
   async createComment(insertComment: InsertComment): Promise<Comment> {
     try {
+      const detectedLanguage = await detectLanguage(insertComment.content);
       const [comment] = await db
         .insert(comments)
         .values({
           ...insertComment,
+          language: detectedLanguage,
           createdAt: new Date()
         })
         .returning();
@@ -1298,6 +1329,159 @@ export class DatabaseStorage implements IStorage {
         .orderBy(comments.createdAt);
     } catch (error) {
       console.error("Error in getCommentReplies:", error);
+      return [];
+    }
+  }
+
+  // Enhanced trending methods
+  async getTrendingHashtags(limit = 10, timeframe: '24h' | '7d' | '30d' = '24h'): Promise<Trend[]> {
+    try {
+      // Simple implementation - return basic trends for now
+      return await this.getTrends();
+    } catch (error) {
+      console.error("Error in getTrendingHashtags:", error);
+      return [];
+    }
+  }
+
+  async getTrendingTopics(language?: string, region?: string, limit = 10): Promise<Trend[]> {
+    try {
+      // For now, return basic trends. Can be enhanced with language/region filtering
+      return await db
+        .select()
+        .from(trends)
+        .orderBy(sql`${trends.postCount} DESC`)
+        .limit(limit);
+    } catch (error) {
+      console.error("Error in getTrendingTopics:", error);
+      return [];
+    }
+  }
+
+  async searchTrends(query: string): Promise<Trend[]> {
+    try {
+      return await db
+        .select()
+        .from(trends)
+        .where(sql`${trends.tag} ILIKE ${`%${query}%`}`)
+        .orderBy(sql`${trends.postCount} DESC`)
+        .limit(20);
+    } catch (error) {
+      console.error("Error in searchTrends:", error);
+      return [];
+    }
+  }
+
+  // Discovery and search methods
+  async globalSearch(query: string, type?: 'posts' | 'users' | 'circuits', limit = 20): Promise<{
+    posts: Post[];
+    users: User[];
+    circuits: Circuit[];
+  }> {
+    try {
+      const results = {
+        posts: [] as Post[],
+        users: [] as User[],
+        circuits: [] as Circuit[]
+      };
+
+      if (!type || type === 'posts') {
+        results.posts = await db
+          .select()
+          .from(posts)
+          .where(sql`${posts.content} ILIKE ${`%${query}%`}`)
+          .orderBy(sql`${posts.createdAt} DESC`)
+          .limit(limit);
+      }
+
+      if (!type || type === 'users') {
+        results.users = await db
+          .select()
+          .from(users)
+          .where(sql`${users.name} ILIKE ${`%${query}%`} OR ${users.username} ILIKE ${`%${query}%`}`)
+          .orderBy(sql`${users.createdAt} DESC`)
+          .limit(limit);
+      }
+
+      if (!type || type === 'circuits') {
+        results.circuits = await db
+          .select()
+          .from(circuits)
+          .where(sql`${circuits.name} ILIKE ${`%${query}%`} OR ${circuits.description} ILIKE ${`%${query}%`}`)
+          .orderBy(sql`${circuits.createdAt} DESC`)
+          .limit(limit);
+      }
+
+      return results;
+    } catch (error) {
+      console.error("Error in globalSearch:", error);
+      return { posts: [], users: [], circuits: [] };
+    }
+  }
+
+  async getRecommendedUsers(currentUserId: number, limit = 10): Promise<User[]> {
+    try {
+      // Simplified user recommendations - users not followed by current user
+      const usersNotFollowed = await db
+        .select()
+        .from(users)
+        .where(sql`${users.id} != ${currentUserId} AND ${users.id} NOT IN (
+          SELECT following_id FROM follows WHERE follower_id = ${currentUserId}
+        )`)
+        .orderBy(sql`${users.createdAt} DESC`)
+        .limit(limit);
+
+      return usersNotFollowed;
+    } catch (error) {
+      console.error("Error in getRecommendedUsers:", error);
+      // Fallback to basic suggested users
+      return await this.getSuggestedUsers(currentUserId);
+    }
+  }
+
+  async getPopularPosts(timeframe: '24h' | '7d' | '30d' = '24h', limit = 20): Promise<Post[]> {
+    try {
+      let timeThreshold = new Date();
+      switch (timeframe) {
+        case '24h':
+          timeThreshold.setHours(timeThreshold.getHours() - 24);
+          break;
+        case '7d':
+          timeThreshold.setDate(timeThreshold.getDate() - 7);
+          break;
+        case '30d':
+          timeThreshold.setDate(timeThreshold.getDate() - 30);
+          break;
+      }
+
+      // Simple popularity based on recent posts
+      return await db
+        .select()
+        .from(posts)
+        .where(sql`${posts.createdAt} >= ${timeThreshold.toISOString()}`)
+        .orderBy(sql`${posts.createdAt} DESC`)
+        .limit(limit);
+    } catch (error) {
+      console.error("Error in getPopularPosts:", error);
+      return [];
+    }
+  }
+
+  async getPostsByHashtag(hashtag: string, page = 1, limit = 20): Promise<Post[]> {
+    try {
+      const offset = (page - 1) * limit;
+      // Remove # prefix if present
+      const cleanHashtag = hashtag.startsWith('#') ? hashtag.slice(1) : hashtag;
+      
+      return await db
+        .select()
+        .from(posts)
+        .where(sql`${posts.content} ILIKE ${`%#${cleanHashtag}%`}`)
+        .orderBy(sql`${posts.createdAt} DESC`)
+        .limit(limit)
+        .offset(offset);
+    } catch (error) {
+      console.error("Error in getPostsByHashtag:", error);
       return [];
     }
   }

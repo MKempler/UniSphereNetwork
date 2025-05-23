@@ -3,7 +3,8 @@ import { useLocation, Link } from "wouter";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { useAuth } from "@/hooks/simpleAuth.js";
+import { useAuth } from "@/hooks/simpleAuth";
+import GlobalSearch from "@/components/GlobalSearch";
 
 const navItems = [
   { label: "nav.home", icon: Home, href: "/", section: "main" },
@@ -25,16 +26,32 @@ const SideNav = () => {
   const { t } = useTranslation();
   const { user, logout, isAuthenticated } = useAuth();
 
+  // Debug log to see user object
+  console.log('LeftSidebar user object:', user);
+  console.log('unreadNotifications:', user?.unreadNotifications);
+
   return (
     <nav className="w-[240px] h-screen sticky top-0 flex flex-col justify-between bg-background border-r border-neutral-200 dark:border-dark-bg/40 py-6" aria-label="Sidebar">
       <div>
+        {/* Search component */}
+        <div className="px-4 mb-6">
+          <GlobalSearch />
+        </div>
+        
         <div className="mb-4 px-4 text-xs font-semibold text-neutral-600 dark:text-neutral-100 uppercase tracking-wider">{t("nav.main")}</div>
         <ul className="space-y-1 mb-6">
           {navItems.filter(i => i.section === "main").map(({ label, icon: Icon, href }) => (
             <li key={href}>
-              <Link href={href} className={`group flex items-center px-4 py-2 rounded-lg transition-colors focus-visible:outline-primary-500 ${location === href ? "bg-primary-500/10 text-primary-600" : "text-neutral-700 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-dark-bg/40"}`} aria-label={t(label)}>
-                <Icon className={`w-5 h-5 mr-3 transition-colors ${location === href ? "text-primary-500" : "group-hover:text-primary-600 group-active:text-primary-600"}`} />
+              <Link href={href} className={`group flex items-center justify-between px-4 py-2 rounded-lg transition-colors focus-visible:outline-primary-500 ${location === href ? "bg-primary-500/10 text-primary-600" : "text-neutral-700 dark:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-dark-bg/40"}`} aria-label={t(label)}>
+                <div className="flex items-center">
+                  <Icon className={`w-5 h-5 mr-3 transition-colors ${location === href ? "text-primary-500" : "group-hover:text-primary-600 group-active:text-primary-600"}`} />
                   <span>{t(label)}</span>
+                </div>
+                {label === "nav.notifications" && user && (
+                  <span className="bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center font-medium min-w-[20px]">
+                    {user.unreadNotifications || 0}
+                  </span>
+                )}
               </Link>
             </li>
           ))}

@@ -13,6 +13,9 @@ import CircuitsIndexPage from "@/pages/circuits/index";
 import CircuitDetailPage from "@/pages/circuits/[id]";
 import CircuitCreatePage from "@/pages/circuits/create";
 import PostDetailPage from "@/pages/post/[id]";
+import Notifications from "@/pages/notifications";
+import Trending from "@/pages/trending";
+import HashtagPosts from "@/pages/hashtag-posts";
 import { useEffect, useState } from "react";
 import { TranslationProvider } from "@/contexts/TranslationContext";
 
@@ -29,6 +32,9 @@ function Router() {
       <Route path="/circuits/create" component={CircuitCreatePage} />
       <Route path="/circuits/:id" component={CircuitDetailPage} />
       <Route path="/post/:id" component={PostDetailPage} />
+      <Route path="/posts/hashtag/:hashtag" component={HashtagPosts} />
+      <Route path="/notifications" component={Notifications} />
+      <Route path="/trending" component={Trending} />
       <Route path="/debug" component={Debug} />
       <Route component={NotFound} />
     </Switch>

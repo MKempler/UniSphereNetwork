@@ -6,6 +6,8 @@ declare module '@/hooks/simpleAuth' {
     name?: string;
     email?: string;
     did?: string | null;
+    profileImage?: string;
+    unreadNotifications?: number;
     // Add other user properties as needed by the app
   }
 
