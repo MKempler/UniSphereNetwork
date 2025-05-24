@@ -156,7 +156,7 @@ export default function Profile() {
               </Avatar>
             </div>
             {/* Follow/Edit Button */}
-            <div className="absolute right-6 bottom-6">
+            <div className="absolute right-6 bottom-6 flex gap-2">
               {isOwnProfile ? (
                 <>
                   <Button variant="outline" onClick={() => setEditOpen(true)} className="bg-white/90 dark:bg-dark-bg/90 backdrop-blur-sm">
@@ -165,13 +165,22 @@ export default function Profile() {
                   <EditProfileModal open={editOpen} onOpenChange={setEditOpen} user={profileUser!} />
                 </>
               ) : (
-                <Button
-                  variant={profileUser!.isFollowing ? "outline" : "default"}
-                  onClick={() => followMutation.mutate()}
-                  className={profileUser!.isFollowing ? "bg-white/90 dark:bg-dark-bg/90 backdrop-blur-sm" : ""}
-                >
-                  {profileUser!.isFollowing ? "Following" : "Follow"}
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate('/messages')}
+                    className="bg-white/90 dark:bg-dark-bg/90 backdrop-blur-sm"
+                  >
+                    Message
+                  </Button>
+                  <Button
+                    variant={profileUser!.isFollowing ? "outline" : "default"}
+                    onClick={() => followMutation.mutate()}
+                    className={profileUser!.isFollowing ? "bg-white/90 dark:bg-dark-bg/90 backdrop-blur-sm" : ""}
+                  >
+                    {profileUser!.isFollowing ? "Following" : "Follow"}
+                  </Button>
+                </>
               )}
             </div>
           </div>

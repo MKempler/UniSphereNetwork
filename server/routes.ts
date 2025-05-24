@@ -18,7 +18,7 @@ import { and, eq, gt, inArray } from "drizzle-orm";
 import fetch from "node-fetch";
 import { sql } from "drizzle-orm";
 import { follows } from "../shared/schema.ts";
-import { relayed_posts, circuits, circuit_posts, posts } from "../shared/schema.ts";
+import { relayed_posts, circuits, circuit_posts, posts, users, conversations, messages, conversationParticipants, messageReactions, conversationSettings } from "../shared/schema.ts";
 import { db } from "./db.ts";
 import bcrypt from "bcrypt";
 import crypto from 'crypto';
@@ -2560,6 +2560,453 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         res.status(200).json({ message: "Post reposted successfully", repostPost });
       }
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Messaging endpoints
+  app.get("/api/conversations", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const conversations = await storage.getUserConversations(userId);
+      
+      // Format conversations with participant info and last message
+      const formattedConversations = await Promise.all(
+        conversations.map(async (conversation) => {
+          // Get participants
+          const participants = await db
+            .select({
+              id: users.id,
+              username: users.username,
+              name: users.name,
+              profileImage: users.profileImage,
+              isVerified: users.isVerified
+            })
+            .from(conversationParticipants)
+            .innerJoin(users, eq(conversationParticipants.userId, users.id))
+            .where(and(
+              eq(conversationParticipants.conversationId, conversation.id),
+              eq(conversationParticipants.isActive, true)
+            ));
+          
+          // Get last message
+          const lastMessage = await db
+            .select()
+            .from(messages)
+            .where(and(
+              eq(messages.conversationId, conversation.id),
+              eq(messages.isDeleted, false)
+            ))
+            .orderBy(sql`${messages.createdAt} DESC`)
+            .limit(1);
+          
+          // Get unread count
+          const unreadCount = await db
+            .select({ count: sql<number>`count(*)` })
+            .from(messages)
+            .innerJoin(conversationParticipants, eq(messages.conversationId, conversationParticipants.conversationId))
+            .where(and(
+              eq(conversationParticipants.userId, userId),
+              eq(conversationParticipants.conversationId, conversation.id),
+              sql`${messages.createdAt} > ${conversationParticipants.lastReadAt}`,
+              eq(messages.isDeleted, false)
+            ));
+          
+          return {
+            ...conversation,
+            participants: participants.filter(p => p.id !== userId), // Don't include current user
+            lastMessage: lastMessage[0] ? {
+              ...lastMessage[0],
+              createdAt: formatDate(lastMessage[0].createdAt),
+              timeAgo: getTimeAgo(lastMessage[0].createdAt)
+            } : null,
+            unreadCount: unreadCount[0]?.count || 0,
+            createdAt: formatDate(conversation.createdAt),
+            updatedAt: formatDate(conversation.updatedAt)
+          };
+        })
+      );
+      
+      res.status(200).json(formattedConversations);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.post("/api/conversations", authMiddleware, async (req, res) => {
+    try {
+      const { type, title, participantIds } = req.body;
+      const userId = req.body.currentUserId;
+      
+      // For direct conversations, check if one already exists
+      if (type === 'direct' && participantIds.length === 1) {
+        const existingConversation = await storage.findDirectConversation(userId, participantIds[0]);
+        if (existingConversation) {
+          return res.status(200).json({ conversationId: existingConversation.id });
+        }
+      }
+      
+      // Create new conversation
+      const conversation = await storage.createConversation({
+        type: type || 'direct',
+        title: title || null,
+        createdBy: userId
+      });
+      
+      // Add participants
+      const allParticipants = [userId, ...participantIds];
+      for (const participantId of allParticipants) {
+        await storage.addParticipant({
+          conversationId: conversation.id,
+          userId: participantId
+        });
+      }
+      
+      res.status(201).json({ conversationId: conversation.id });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.get("/api/conversations/:id/messages", authMiddleware, async (req, res) => {
+    try {
+      const conversationId = parseInt(req.params.id);
+      const userId = req.body.currentUserId;
+      const page = parseInt(req.query.page as string) || 1;
+      const limit = parseInt(req.query.limit as string) || 50;
+      
+      // Verify user is participant
+      const isParticipant = await db
+        .select()
+        .from(conversationParticipants)
+        .where(and(
+          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.userId, userId),
+          eq(conversationParticipants.isActive, true)
+        ))
+        .limit(1);
+      
+      if (!isParticipant.length) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      const messages = await storage.getConversationMessages(conversationId, page, limit);
+      
+      // Format messages with sender info, reactions, and reply data
+      const formattedMessages = await Promise.all(
+        messages.map(async (message) => {
+          const sender = await storage.getUser(message.senderId);
+          
+          // Get reactions for this message
+          const reactions = await db
+            .select({
+              emoji: messageReactions.emoji,
+              userId: messageReactions.userId
+            })
+            .from(messageReactions)
+            .where(eq(messageReactions.messageId, message.id));
+          
+          // Group reactions by emoji and count them
+          const reactionMap = new Map();
+          reactions.forEach(reaction => {
+            const key = reaction.emoji;
+            if (!reactionMap.has(key)) {
+              reactionMap.set(key, { emoji: key, count: 0, hasReacted: false, users: [] });
+            }
+            const reactionData = reactionMap.get(key);
+            reactionData.count++;
+            reactionData.users.push(reaction.userId);
+            if (reaction.userId === userId) {
+              reactionData.hasReacted = true;
+            }
+          });
+          
+          const formattedReactions = Array.from(reactionMap.values()).map(reaction => ({
+            emoji: reaction.emoji,
+            count: reaction.count,
+            hasReacted: reaction.hasReacted
+          }));
+          
+                               // Fetch reply-to message if this message is a reply
+          let replyToMessage = null;
+          if (message.replyToMessageId) {
+            try {
+              const replyMsg = await db
+                .select({
+                  id: messages.id,
+                  content: messages.content,
+                  senderId: messages.senderId
+                })
+                .from(messages)
+                .where(eq(messages.id, Number(message.replyToMessageId)))
+                .limit(1);
+              
+              if (replyMsg.length > 0) {
+                const replyMessage = replyMsg[0];
+                const replySender = await storage.getUser(replyMessage.senderId);
+                replyToMessage = {
+                  id: replyMessage.id,
+                  content: replyMessage.content,
+                  sender: replySender ? {
+                    id: replySender.id,
+                    username: replySender.username,
+                    name: replySender.name,
+                    profileImage: replySender.profileImage,
+                    isVerified: replySender.isVerified
+                  } : null
+                };
+              }
+            } catch (error) {
+              console.error('Error fetching reply-to message:', error);
+            }
+          }
+          
+          const formattedMessage = {
+            ...message,
+            sender: sender ? {
+              id: sender.id,
+              username: sender.username,
+              name: sender.name,
+              profileImage: sender.profileImage,
+              isVerified: sender.isVerified
+            } : null,
+            reactions: formattedReactions,
+            replyToMessage,
+            createdAt: formatDate(message.createdAt),
+            timeAgo: getTimeAgo(message.createdAt)
+          };
+          
+
+          
+          return formattedMessage;
+        })
+      );
+      
+      // Reverse to show oldest first
+      formattedMessages.reverse();
+      
+      res.status(200).json(formattedMessages);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.post("/api/conversations/:id/messages", authMiddleware, async (req, res) => {
+    try {
+      const conversationId = parseInt(req.params.id);
+      const { content, messageType, replyToMessageId, fileUrl, fileName, fileType, fileSize } = req.body;
+      const userId = req.body.currentUserId;
+      
+      console.log('Message data received:', { content, messageType, replyToMessageId, fileUrl, fileName, fileType, fileSize });
+      
+      // Verify user is participant
+      const isParticipant = await db
+        .select()
+        .from(conversationParticipants)
+        .where(and(
+          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.userId, userId),
+          eq(conversationParticipants.isActive, true)
+        ))
+        .limit(1);
+      
+      if (!isParticipant.length) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      // Send message
+      const message = await storage.sendMessage({
+        conversationId,
+        senderId: userId,
+        content,
+        messageType: messageType || 'text',
+        replyToMessageId,
+        fileUrl,
+        fileName,
+        fileType,
+        fileSize
+      });
+      
+      // Get sender info for response
+      const sender = await storage.getUser(userId);
+      
+      // Fetch reply-to message data for response
+      let replyToMessage = null;
+      if (message.replyToMessageId) {
+        try {
+          const replyMsg = await db
+            .select({
+              id: messages.id,
+              content: messages.content,
+              senderId: messages.senderId
+            })
+            .from(messages)
+            .where(eq(messages.id, Number(message.replyToMessageId)))
+            .limit(1);
+          
+          if (replyMsg.length > 0) {
+            const replyMessage = replyMsg[0];
+            const replySender = await storage.getUser(replyMessage.senderId);
+            replyToMessage = {
+              id: replyMessage.id,
+              content: replyMessage.content,
+              sender: replySender ? {
+                id: replySender.id,
+                username: replySender.username,
+                name: replySender.name,
+                profileImage: replySender.profileImage,
+                isVerified: replySender.isVerified
+              } : null
+            };
+          }
+        } catch (error) {
+          console.error('Error fetching reply-to message for response:', error);
+        }
+      }
+      
+      const formattedMessage = {
+        ...message,
+        sender: sender ? {
+          id: sender.id,
+          username: sender.username,
+          name: sender.name,
+          profileImage: sender.profileImage,
+          isVerified: sender.isVerified
+        } : null,
+        replyToMessage,
+        createdAt: formatDate(message.createdAt),
+        timeAgo: getTimeAgo(message.createdAt)
+      };
+      
+      res.status(201).json(formattedMessage);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.patch("/api/conversations/:id/read", authMiddleware, async (req, res) => {
+    try {
+      const conversationId = parseInt(req.params.id);
+      const userId = req.body.currentUserId;
+      
+      await storage.markAsRead(conversationId, userId);
+      res.status(200).json({ message: "Conversation marked as read" });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  app.get("/api/messages/unread-count", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const unreadCount = await storage.getUnreadMessageCount(userId);
+      res.status(200).json({ unreadCount });
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Message reactions
+  app.post("/api/messages/:id/react", authMiddleware, async (req, res) => {
+    try {
+      const messageId = parseInt(req.params.id);
+      const { emoji } = req.body;
+      const userId = req.body.currentUserId;
+      
+      if (!emoji) {
+        return res.status(400).json({ message: "Emoji is required" });
+      }
+      
+      // Check if user already reacted with this emoji
+      const existingReaction = await db
+        .select()
+        .from(messageReactions)
+        .where(and(
+          eq(messageReactions.messageId, messageId),
+          eq(messageReactions.userId, userId),
+          eq(messageReactions.emoji, emoji)
+        ))
+        .limit(1);
+      
+      if (existingReaction.length > 0) {
+        // Remove existing reaction
+        await db
+          .delete(messageReactions)
+          .where(eq(messageReactions.id, existingReaction[0].id));
+        res.status(200).json({ message: "Reaction removed" });
+      } else {
+        // Add new reaction
+        await db.insert(messageReactions).values({
+          messageId,
+          userId,
+          emoji
+        });
+        res.status(201).json({ message: "Reaction added" });
+      }
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Search messages
+  app.get("/api/conversations/:id/search", authMiddleware, async (req, res) => {
+    try {
+      const conversationId = parseInt(req.params.id);
+      const { q } = req.query;
+      const userId = req.body.currentUserId;
+      
+      if (!q) {
+        return res.status(400).json({ message: "Query parameter 'q' is required" });
+      }
+      
+      // Verify user is participant
+      const isParticipant = await db
+        .select()
+        .from(conversationParticipants)
+        .where(and(
+          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.userId, userId),
+          eq(conversationParticipants.isActive, true)
+        ))
+        .limit(1);
+      
+      if (!isParticipant.length) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      
+      // Search messages using full-text search
+      const searchResults = await db
+        .select()
+        .from(messages)
+        .where(and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.isDeleted, false),
+          sql`to_tsvector('english', ${messages.content}) @@ plainto_tsquery('english', ${q as string})`
+        ))
+        .orderBy(sql`${messages.createdAt} DESC`)
+        .limit(50);
+      
+      // Format messages with sender info
+      const formattedMessages = await Promise.all(
+        searchResults.map(async (message) => {
+          const sender = await storage.getUser(message.senderId);
+          return {
+            ...message,
+            sender: sender ? {
+              id: sender.id,
+              username: sender.username,
+              name: sender.name,
+              profileImage: sender.profileImage,
+              isVerified: sender.isVerified
+            } : null,
+            createdAt: formatDate(message.createdAt),
+            timeAgo: getTimeAgo(message.createdAt)
+          };
+        })
+      );
+      
+      res.status(200).json(formattedMessages);
     } catch (error) {
       handleError(error, res);
     }

@@ -37,9 +37,14 @@ export default defineConfig(async (): Promise<UserConfig> => {
     server: {
       proxy: {
         '/api': {
-          target: 'http://localhost:5000',
+          target: 'http://localhost:3001',
           changeOrigin: true,
           secure: false, // Assuming backend is http
+        },
+        '/uploads': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+          secure: false, // For serving uploaded files
         },
       },
     },

@@ -160,6 +160,69 @@ export const relayed_posts = pgTable('relayed_posts', {
   sourceRelayUrl: varchar('source_relay_url', { length: 255 }).notNull(),
 });
 
+// Conversations
+export const conversations = pgTable('conversations', {
+  id: serial('id').primaryKey(),
+  type: varchar('type', { length: 20 }).notNull().default('direct'), // 'direct' or 'group'
+  title: text('title'), // For group conversations
+  createdBy: integer('created_by').references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+});
+
+// Messages
+export const messages = pgTable('messages', {
+  id: serial('id').primaryKey(),
+  conversationId: integer('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  senderId: integer('sender_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  messageType: varchar('message_type', { length: 20 }).notNull().default('text'), // 'text', 'image', 'file', 'system'
+  replyToMessageId: integer('reply_to_message_id'),
+  fileUrl: text('file_url'),
+  fileName: text('file_name'),
+  fileType: text('file_type'),
+  fileSize: integer('file_size'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  editedAt: timestamp('edited_at', { withTimezone: true }),
+  isDeleted: boolean('is_deleted').notNull().default(false)
+});
+
+// Conversation Participants
+export const conversationParticipants = pgTable('conversation_participants', {
+  id: serial('id').primaryKey(),
+  conversationId: integer('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+  lastReadAt: timestamp('last_read_at', { withTimezone: true }).defaultNow(),
+  isActive: boolean('is_active').notNull().default(true), // For leaving/rejoining groups
+  isAdmin: boolean('is_admin').notNull().default(false) // Admin role for group management
+}, (table) => ({
+  conversationUserUnique: unique().on(table.conversationId, table.userId),
+}));
+
+// Message Reactions
+export const messageReactions = pgTable('message_reactions', {
+  id: serial('id').primaryKey(),
+  messageId: integer('message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  emoji: varchar('emoji', { length: 10 }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => ({
+  messageUserEmojiUnique: unique().on(table.messageId, table.userId, table.emoji),
+}));
+
+// Conversation Settings
+export const conversationSettings = pgTable('conversation_settings', {
+  id: serial('id').primaryKey(),
+  conversationId: integer('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  allowMemberAdd: boolean('allow_member_add').notNull().default(true),
+  allowMemberRemove: boolean('allow_member_remove').notNull().default(false),
+  allowNameChange: boolean('allow_name_change').notNull().default(true),
+  muteNotifications: boolean('mute_notifications').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow()
+});
+
 // Create schemas for insertable data
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
@@ -253,6 +316,46 @@ export const insertNotificationSchema = createInsertSchema(notifications).pick({
   data: true
 });
 
+export const insertConversationSchema = createInsertSchema(conversations).pick({
+  type: true,
+  title: true,
+  createdBy: true
+});
+
+export const insertMessageSchema = createInsertSchema(messages).pick({
+  conversationId: true,
+  senderId: true,
+  content: true,
+  messageType: true,
+  replyToMessageId: true,
+  fileUrl: true,
+  fileName: true,
+  fileType: true,
+  fileSize: true
+});
+
+export const insertConversationParticipantSchema = createInsertSchema(conversationParticipants).pick({
+  conversationId: true,
+  userId: true,
+  lastReadAt: true,
+  isActive: true,
+  isAdmin: true
+});
+
+export const insertMessageReactionSchema = createInsertSchema(messageReactions).pick({
+  messageId: true,
+  userId: true,
+  emoji: true
+});
+
+export const insertConversationSettingsSchema = createInsertSchema(conversationSettings).pick({
+  conversationId: true,
+  allowMemberAdd: true,
+  allowMemberRemove: true,
+  allowNameChange: true,
+  muteNotifications: true
+});
+
 // Define types for insert operations
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type InsertPost = z.infer<typeof insertPostSchema>;
@@ -266,6 +369,11 @@ export type InsertCommunity = z.infer<typeof insertCommunitySchema>;
 export type InsertCommunityMember = z.infer<typeof insertCommunityMemberSchema>;
 export type InsertTrend = z.infer<typeof insertTrendSchema>;
 export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type InsertConversation = z.infer<typeof insertConversationSchema>;
+export type InsertMessage = z.infer<typeof insertMessageSchema>;
+export type InsertConversationParticipant = z.infer<typeof insertConversationParticipantSchema>;
+export type InsertMessageReaction = z.infer<typeof insertMessageReactionSchema>;
+export type InsertConversationSettings = z.infer<typeof insertConversationSettingsSchema>;
 
 // Define types for select operations
 export type User = typeof users.$inferSelect;
@@ -280,6 +388,11 @@ export type Community = typeof communities.$inferSelect;
 export type CommunityMember = typeof communityMembers.$inferSelect;
 export type Trend = typeof trends.$inferSelect;
 export type Notification = typeof notifications.$inferSelect;
+export type Conversation = typeof conversations.$inferSelect;
+export type Message = typeof messages.$inferSelect;
+export type ConversationParticipant = typeof conversationParticipants.$inferSelect;
+export type MessageReaction = typeof messageReactions.$inferSelect;
+export type ConversationSettings = typeof conversationSettings.$inferSelect;
 
 // Custom schemas for client-side operations
 export const loginSchema = z.object({

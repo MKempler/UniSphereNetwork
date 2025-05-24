@@ -10,12 +10,16 @@ import type {
   Community, InsertCommunity,
   CommunityMember, InsertCommunityMember,
   Trend, InsertTrend,
-  Notification, InsertNotification
+  Notification, InsertNotification,
+  Conversation, InsertConversation,
+  Message, InsertMessage,
+  ConversationParticipant, InsertConversationParticipant
 } from "../shared/schema.ts";
 import {
   users, posts, follows, postInteractions, comments,
   circuits, circuit_subscriptions, categories,
-  communities, communityMembers, trends, notifications
+  communities, communityMembers, trends, notifications,
+  conversations, messages, conversationParticipants
 } from "../shared/schema.ts";
 import { db } from "./db.ts";
 import { eq, and, sql, inArray, isNotNull } from "drizzle-orm";
@@ -127,6 +131,18 @@ export interface IStorage {
   getUserFollowers(userId: number): Promise<User[]>;
   getUserFollowing(userId: number): Promise<User[]>;
   getMutualFollowers(userId: number, otherUserId: number): Promise<User[]>;
+
+  // Messaging operations
+  createConversation(conversation: InsertConversation): Promise<Conversation>;
+  getConversation(id: number): Promise<Conversation | undefined>;
+  getUserConversations(userId: number): Promise<Conversation[]>;
+  sendMessage(message: InsertMessage): Promise<Message>;
+  getConversationMessages(conversationId: number, page?: number, limit?: number): Promise<Message[]>;
+  addParticipant(participant: InsertConversationParticipant): Promise<ConversationParticipant>;
+  removeParticipant(conversationId: number, userId: number): Promise<void>;
+  markAsRead(conversationId: number, userId: number): Promise<void>;
+  getUnreadMessageCount(userId: number): Promise<number>;
+  findDirectConversation(userId1: number, userId2: number): Promise<Conversation | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1509,6 +1525,197 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("Error in getPostsByHashtag:", error);
       return [];
+    }
+  }
+
+  // Messaging methods implementation
+  async createConversation(insertConversation: InsertConversation): Promise<Conversation> {
+    try {
+      const [conversation] = await db
+        .insert(conversations)
+        .values({
+          ...insertConversation,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        })
+        .returning();
+      return conversation;
+    } catch (error) {
+      console.error("Error in createConversation:", error);
+      throw error;
+    }
+  }
+
+  async getConversation(id: number): Promise<Conversation | undefined> {
+    try {
+      const [conversation] = await db
+        .select()
+        .from(conversations)
+        .where(eq(conversations.id, id));
+      return conversation;
+    } catch (error) {
+      console.error("Error in getConversation:", error);
+      return undefined;
+    }
+  }
+
+  async getUserConversations(userId: number): Promise<Conversation[]> {
+    try {
+      const userConversations = await db
+        .select({
+          id: conversations.id,
+          type: conversations.type,
+          title: conversations.title,
+          createdBy: conversations.createdBy,
+          createdAt: conversations.createdAt,
+          updatedAt: conversations.updatedAt
+        })
+        .from(conversations)
+        .innerJoin(conversationParticipants, eq(conversations.id, conversationParticipants.conversationId))
+        .where(and(
+          eq(conversationParticipants.userId, userId),
+          eq(conversationParticipants.isActive, true)
+        ))
+        .orderBy(sql`${conversations.updatedAt} DESC`);
+      
+      return userConversations;
+    } catch (error) {
+      console.error("Error in getUserConversations:", error);
+      return [];
+    }
+  }
+
+  async sendMessage(insertMessage: InsertMessage): Promise<Message> {
+    try {
+      const [message] = await db
+        .insert(messages)
+        .values({
+          ...insertMessage,
+          createdAt: new Date()
+        })
+        .returning();
+      return message;
+    } catch (error) {
+      console.error("Error in sendMessage:", error);
+      throw error;
+    }
+  }
+
+  async getConversationMessages(conversationId: number, page = 1, limit = 50): Promise<Message[]> {
+    try {
+      const offset = (page - 1) * limit;
+      return await db
+        .select()
+        .from(messages)
+        .where(and(
+          eq(messages.conversationId, conversationId),
+          eq(messages.isDeleted, false)
+        ))
+        .orderBy(sql`${messages.createdAt} DESC`)
+        .limit(limit)
+        .offset(offset);
+    } catch (error) {
+      console.error("Error in getConversationMessages:", error);
+      return [];
+    }
+  }
+
+  async addParticipant(insertParticipant: InsertConversationParticipant): Promise<ConversationParticipant> {
+    try {
+      const [participant] = await db
+        .insert(conversationParticipants)
+        .values({
+          ...insertParticipant,
+          joinedAt: new Date(),
+          lastReadAt: new Date()
+        })
+        .returning();
+      return participant;
+    } catch (error) {
+      console.error("Error in addParticipant:", error);
+      throw error;
+    }
+  }
+
+  async removeParticipant(conversationId: number, userId: number): Promise<void> {
+    try {
+      await db
+        .update(conversationParticipants)
+        .set({ isActive: false })
+        .where(and(
+          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.userId, userId)
+        ));
+    } catch (error) {
+      console.error("Error in removeParticipant:", error);
+      throw error;
+    }
+  }
+
+  async markAsRead(conversationId: number, userId: number): Promise<void> {
+    try {
+      await db
+        .update(conversationParticipants)
+        .set({ lastReadAt: new Date() })
+        .where(and(
+          eq(conversationParticipants.conversationId, conversationId),
+          eq(conversationParticipants.userId, userId)
+        ));
+    } catch (error) {
+      console.error("Error in markAsRead:", error);
+      throw error;
+    }
+  }
+
+  async getUnreadMessageCount(userId: number): Promise<number> {
+    try {
+      const result = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(messages)
+        .innerJoin(conversationParticipants, eq(messages.conversationId, conversationParticipants.conversationId))
+        .where(and(
+          eq(conversationParticipants.userId, userId),
+          sql`${messages.createdAt} > ${conversationParticipants.lastReadAt}`,
+          eq(messages.isDeleted, false)
+        ));
+      
+      return result[0]?.count || 0;
+    } catch (error) {
+      console.error("Error in getUnreadMessageCount:", error);
+      return 0;
+    }
+  }
+
+  async findDirectConversation(userId1: number, userId2: number): Promise<Conversation | undefined> {
+    try {
+      // Find direct conversations where both users are participants
+      const result = await db
+        .select({
+          id: conversations.id,
+          type: conversations.type,
+          title: conversations.title,
+          createdBy: conversations.createdBy,
+          createdAt: conversations.createdAt,
+          updatedAt: conversations.updatedAt
+        })
+        .from(conversations)
+        .innerJoin(conversationParticipants, eq(conversations.id, conversationParticipants.conversationId))
+        .where(and(
+          eq(conversations.type, 'direct'),
+          sql`${conversations.id} IN (
+            SELECT cp1.conversation_id 
+            FROM conversation_participants cp1
+            INNER JOIN conversation_participants cp2 ON cp1.conversation_id = cp2.conversation_id
+            WHERE cp1.user_id = ${userId1} AND cp2.user_id = ${userId2}
+            AND cp1.is_active = true AND cp2.is_active = true
+          )`
+        ))
+        .limit(1);
+      
+      return result[0];
+    } catch (error) {
+      console.error("Error in findDirectConversation:", error);
+      return undefined;
     }
   }
 }

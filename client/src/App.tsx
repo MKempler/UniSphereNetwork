@@ -17,6 +17,7 @@ import PostDetailPage from "@/pages/post/[id]";
 import Notifications from "@/pages/notifications";
 import Trending from "@/pages/trending";
 import HashtagPosts from "@/pages/hashtag-posts";
+import Messages from "@/pages/messages";
 import { useEffect, useState } from "react";
 import { TranslationProvider } from "@/contexts/TranslationContext";
 
@@ -36,6 +37,7 @@ function Router() {
       <Route path="/post/:id" component={PostDetailPage} />
       <Route path="/posts/hashtag/:hashtag" component={HashtagPosts} />
       <Route path="/notifications" component={Notifications} />
+      <Route path="/messages" component={Messages} />
       <Route path="/trending" component={Trending} />
       <Route path="/debug" component={Debug} />
       <Route component={NotFound} />
