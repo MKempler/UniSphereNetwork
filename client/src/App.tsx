@@ -18,6 +18,8 @@ import Notifications from "@/pages/notifications";
 import Trending from "@/pages/trending";
 import HashtagPosts from "@/pages/hashtag-posts";
 import Messages from "@/pages/messages";
+import CommunitiesPage from "@/pages/communities/index";
+import CommunityCreatePage from "@/pages/communities/create";
 import { useEffect, useState } from "react";
 import { TranslationProvider } from "@/contexts/TranslationContext";
 
@@ -31,6 +33,8 @@ function Router() {
       <Route path="/profile/:username?" component={Profile} />
       <Route path="/followers/:username" component={Followers} />
       <Route path="/following/:username" component={Following} />
+      <Route path="/communities" component={CommunitiesPage} />
+      <Route path="/communities/create" component={CommunityCreatePage} />
       <Route path="/circuits" component={CircuitsIndexPage} />
       <Route path="/circuits/create" component={CircuitCreatePage} />
       <Route path="/circuits/:id" component={CircuitDetailPage} />

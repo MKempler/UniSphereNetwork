@@ -87,6 +87,7 @@ export interface IStorage {
 
   // Community operations
   getCommunity(id: number): Promise<Community | undefined>;
+  getCommunities(): Promise<Community[]>;
   getUserCommunities(userId: number): Promise<Community[]>;
   createCommunity(community: InsertCommunity): Promise<Community>;
   joinCommunity(userId: number, communityId: number): Promise<CommunityMember>;
@@ -954,6 +955,15 @@ export class DatabaseStorage implements IStorage {
     } catch (error) {
       console.error("Error in getCommunity:", error);
       return undefined;
+    }
+  }
+
+  async getCommunities(): Promise<Community[]> {
+    try {
+      return await db.select().from(communities).orderBy(sql`${communities.createdAt} DESC`);
+    } catch (error) {
+      console.error("Error in getCommunities:", error);
+      return [];
     }
   }
   
