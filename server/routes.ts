@@ -1572,6 +1572,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // List all communities
+  app.get("/api/communities", async (req, res) => {
+    try {
+      const userId = req.session.userId;
+      const communities = await storage.getCommunities();
+
+      const formatted = await Promise.all(
+        communities.map(async (community) => {
+          const memberCount = await storage.getCommunityMemberCount(community.id);
+          const isJoined = userId ? await storage.isJoinedCommunity(userId, community.id) : false;
+          return {
+            id: community.id,
+            name: community.name,
+            description: community.description,
+            color: community.color,
+            memberCount,
+            isJoined,
+          };
+        })
+      );
+
+      res.status(200).json(formatted);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Create a community
+  app.post("/api/communities", authMiddleware, async (req, res) => {
+    try {
+      const { name, description, color } = req.body;
+      if (!name) return res.status(400).json({ message: "Name is required" });
+
+      const community = await storage.createCommunity({ name, description, color });
+      res.status(201).json(community);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Join community
+  app.post("/api/communities/:id/join", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const communityId = parseInt(req.params.id);
+      const member = await storage.joinCommunity(userId, communityId);
+      res.status(201).json(member);
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
+  // Leave community
+  app.delete("/api/communities/:id/join", authMiddleware, async (req, res) => {
+    try {
+      const userId = req.body.currentUserId;
+      const communityId = parseInt(req.params.id);
+      await storage.leaveCommunity(userId, communityId);
+      res.status(204).end();
+    } catch (error) {
+      handleError(error, res);
+    }
+  });
+
   // Trends
   app.get("/api/trends", async (req, res) => {
     try {
